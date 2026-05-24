@@ -29,15 +29,15 @@ const login = async (req, res) => {
       return res.status(401).json({ status: "Error", message: "بيانات الدخول غير صحيحة" });
     }
 
-  res.cookie("token", result.token, {
-  httpOnly: true,
-  secure: process.env.NODE_ENV === "production",
-  sameSite: "strict",
-  path: "/",
-  maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
-});
+    // ✅ تحديث إعدادات الأمان لتتوافق مع نطاقات Vercel و Render السحابية
+    res.cookie("token", result.token, {
+      httpOnly: true,
+      secure: true,          // 🔒 إجبار التشفير دائماً لأن السحاب يفرض HTTPS
+      sameSite: "none",      // 🌐 السماح بنقل الكوكي بين النطاقات المختلفة (Cross-Site)
+      path: "/",
+      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 أيام
+    });
 
-    
     res.json({
       status: "Success",
       user: {
