@@ -23,10 +23,26 @@ const app = express();
  * =========================
  */
 
-// CORS (secure config)
+// ✅ إعداد CORS ديناميكي وآمن للسحاب واللوكال معاً
+const allowedOrigins = [
+    "http://localhost:3000",                          // لوكال
+    "https://justefy-frontend.vercel.app",           // رابط فيرسيل الافتراضي
+    "https://justefy.com",                            // دومينك الرسمي المربوط
+    "https://www.justefy.com"                         // الدومين بـ www
+];
+
 app.use(cors({
-    origin: "http://localhost:3000",
-    credentials: true
+    origin: function (origin, callback) {
+        // السماح بالطلبات التي ليس لها origin (مثل تطبيقات الموبايل أو Postman) أو النطاقات المسموحة
+        if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+            callback(null, true);
+        } else {
+            callback(new Error('❌ Not allowed by CORS via Justefy Security'));
+        }
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept']
 }));
 
 // JSON parser
