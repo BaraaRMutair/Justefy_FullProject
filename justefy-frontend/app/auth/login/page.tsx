@@ -6,7 +6,6 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 
 import {
     Eye,
@@ -28,8 +27,6 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
 // ================= Component =================
 export default function LoginPage() {
-    const router = useRouter();
-
     const [showPassword, setShowPassword] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [apiError, setApiError] = useState<string | null>(null);
@@ -43,51 +40,50 @@ export default function LoginPage() {
     });
 
     // ================= Submit =================
-    // داخل دالة onSubmit في ملف login/page.tsx
-const onSubmit = async (data: LoginFormData) => {
-    setIsLoading(true);
-    setApiError(null);
+    const onSubmit = async (data: LoginFormData) => {
+        setIsLoading(true);
+        setApiError(null);
 
-    try {
-        const res = await fetch(`${API_URL}/api/auth/login`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            credentials: "include",
-            body: JSON.stringify(data),
-        });
+        try {
+            const res = await fetch(`${API_URL}/api/auth/login`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                credentials: "include",
+                body: JSON.stringify(data),
+            });
 
-        const result = await res.json();
+            const result = await res.json();
 
-        if (!res.ok) throw new Error(result.message || "فشل تسجيل الدخول");
+            if (!res.ok) throw new Error(result.message || "فشل تسجيل الدخول");
 
-        // ✅ حفظ البيانات والتوجه بشكل آمن وصارم
-        if (result.user) {
-            localStorage.setItem("user_role", result.user.role || "admin");
-            
-            // حماية الاسم من الـ null: إذا رجع من السيرفر فاضي، نضع اسم افتراضي فوراً
-            const safeName = result.user.name || result.user.fullName || "Baraa";
-            localStorage.setItem("user_name", safeName);
+            // ✅ حفظ البيانات والتوجه بشكل آمن وصارم
+            if (result.user) {
+                localStorage.setItem("user_role", result.user.role || "user");
+                
+                // حماية الاسم من الـ null
+                const safeName = result.user.name || result.user.fullName || "Baraa";
+                localStorage.setItem("user_name", safeName);
 
-            // توجيه الأدمن وإيقاف بقية الدالة فوراً من خلال الـ return
-            if (result.user.role === 'admin') {
-                window.location.href = "/dashboard";
-                return; 
-            } else {
-                window.location.href = "/";
-                return;
+                // توجيه الأدمن وإيقاف بقية الدالة فوراً من خلال الـ return
+                if (result.user.role === 'admin') {
+                    window.location.href = "/dashboard";
+                    return; 
+                } else {
+                    window.location.href = "/";
+                    return;
+                }
             }
+
+            // خطة بديلة صارمة في حال نجح الطلب ولم يرجع كائن مستخدم
+            window.location.href = "/";
+
+        } catch (err: any) {
+            setApiError(err.message);
+        } finally {
+            setIsLoading(false);
         }
+    };
 
-        // في حال لم يكن هناك يوزر (خطة بديلة)
-        router.push("/");
-        router.refresh();
-
-    } catch (err: any) {
-        setApiError(err.message);
-    } finally {
-        setIsLoading(false);
-    }
-};
     // ================= UI =================
     return (
         <motion.div
