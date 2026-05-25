@@ -6,16 +6,22 @@ import {
   MessageCircle,
   X,
   Send,
-  Bot,
-  Sparkles,
   Minimize2,
   Maximize2,
+  Zap,
+  Sparkles,
 } from "lucide-react";
+
+type Message = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+};
 
 export default function ChatBot() {
   const [isOpen, setIsOpen] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
-  const [messages, setMessages] = useState<any[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -23,7 +29,7 @@ export default function ChatBot() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [userId, setUserId] = useState("");
 
-  // ✅ يمنع hydration mismatch
+  // mount + init
   useEffect(() => {
     setMounted(true);
 
@@ -39,38 +45,47 @@ export default function ChatBot() {
     const saved = localStorage.getItem("chat_messages");
 
     if (saved) {
-      setMessages(JSON.parse(saved));
+      try {
+        setMessages(JSON.parse(saved));
+      } catch {
+        setMessages([
+          {
+            id: "welcome",
+            role: "assistant",
+            content: "مرحباً، كيف يمكننا مساعدتك اليوم؟",
+          },
+        ]);
+      }
     } else {
       setMessages([
         {
           id: "welcome",
           role: "assistant",
-          content: "مرحباً 👋 كيف يمكن لـ Justefy مساعدتك اليوم؟",
+          content: "مرحباً، كيف يمكننا مساعدتك اليوم؟",
         },
       ]);
     }
   }, []);
 
-  // حفظ الرسائل
+  // save messages
   useEffect(() => {
     if (!mounted) return;
 
     localStorage.setItem(
       "chat_messages",
-      JSON.stringify(messages.slice(-10))
+      JSON.stringify(messages.slice(-20))
     );
 
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, mounted]);
 
-  // منع أي render قبل mount
   if (!mounted) return null;
 
   const sendMessage = async () => {
     const text = input.trim();
     if (!text || isLoading) return;
 
-    const userMsg = {
+    const userMsg: Message = {
       id: crypto.randomUUID(),
       role: "user",
       content: text,
@@ -92,15 +107,14 @@ export default function ChatBot() {
 
       const data = await res.json();
 
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          role: "assistant",
-          content: data.aiResponse || "لا يوجد رد",
-        },
-      ]);
-    } catch (err) {
+      const botMsg: Message = {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: data.aiResponse || "لا يوجد رد",
+      };
+
+      setMessages((prev) => [...prev, botMsg]);
+    } catch {
       setMessages((prev) => [
         ...prev,
         {
@@ -116,6 +130,7 @@ export default function ChatBot() {
 
   return (
     <div className="fixed bottom-6 left-6 z-50">
+      {/* Open Button */}
       <AnimatePresence>
         {!isOpen && (
           <motion.button
@@ -130,6 +145,7 @@ export default function ChatBot() {
         )}
       </AnimatePresence>
 
+      {/* Chat Window */}
       <AnimatePresence>
         {isOpen && (
           <motion.div
@@ -144,9 +160,9 @@ export default function ChatBot() {
             className="w-96 bg-white rounded-3xl shadow-2xl overflow-hidden flex flex-col"
           >
             {/* Header */}
-            <div className="p-4 bg-justefy-500 text-white flex justify-between">
+            <div className="p-4 bg-justefy-500 text-white flex justify-between items-center">
               <div className="flex items-center gap-2">
-                <Bot className="w-5 h-5" />
+                <Zap className="w-5 h-5" />
                 <span className="font-bold text-sm">Justefy AI</span>
               </div>
 
@@ -158,6 +174,7 @@ export default function ChatBot() {
                     <Minimize2 className="w-4 h-4" />
                   )}
                 </button>
+
                 <button onClick={() => setIsOpen(false)}>
                   <X className="w-4 h-4" />
                 </button>

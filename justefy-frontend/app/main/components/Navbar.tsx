@@ -124,7 +124,7 @@ export default function Navbar() {
                         ))}
                         {userRole === "admin" && (
                             <Link href="/dashboard" onClick={() => setIsMobileMenuOpen(false)} className="block text-justefy-600 font-black border-t border-gray-800 pt-4">
-                                📊 لوحة الإدارة
+                               لوحة الإدارة
                             </Link>
                         )}
                         <button onClick={handleLogout} className="w-full text-center py-4 text-red-500 font-bold bg-red-500/5 rounded-2xl">خروج</button>

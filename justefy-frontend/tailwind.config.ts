@@ -38,9 +38,10 @@ const config: Config = {
                 },
             },
 
-            fontFamily: {
-                sans: ["var(--font-alexandria)"],
-            },
+          fontFamily: {
+    sans: ["Inter", "IBM Plex Sans Arabic", "system-ui", "sans-serif"],
+    display: ["Inter", "IBM Plex Sans Arabic", "system-ui", "sans-serif"],
+},
 
             backgroundImage: {
                 "hero-gradient":
@@ -53,7 +54,7 @@ const config: Config = {
             boxShadow: {
                 soft: "0 10px 30px rgba(0,0,0,0.08)",
 
-                glow: "0 0 40px rgba(249,115,22,0.25)",
+                 glow: "0 8px 30px rgba(249,115,22,0.15)",
 
                 card: "0 8px 32px rgba(15, 23, 42, 0.08)",
             },
