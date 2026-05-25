@@ -18,23 +18,36 @@ export default function DashboardLayout({
 }) {
   const router = useRouter();
   const [isAuthorized, setIsAuthorized] = useState(false);
+  const [checkingAuth, setCheckingAuth] = useState(true);
 
   useEffect(() => {
-    const role = localStorage.getItem("user_role");
-    if (role !== "admin") {
-      router.replace("/"); // استخدام replace أفضل من push في الحماية
-    } else {
-      setIsAuthorized(true);
+    // التحقق الآمن بعد التأكد من أن الكود يعمل بالكامل على المتصفح
+    if (typeof window !== "undefined") {
+      const role = localStorage.getItem("user_role");
+      
+      if (role === "admin") {
+        setIsAuthorized(true);
+      } else {
+        setIsAuthorized(false);
+        router.replace("/"); // طرد المستخدم العادي للرئيسية
+      }
+      setCheckingAuth(false);
     }
   }, [router]);
 
-  if (!isAuthorized) return null;
+  // إذا جاري الفحص أو غير مصرح له، لا تعرض أي شيء في المتصفح لمنع الوميض أو الطردة المزدوجة
+  if (checkingAuth || !isAuthorized) {
+    return (
+      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
+        <div className="w-8 h-8 border-4 border-justefy-500 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
+  }
 
   return (
     <main className={`${ibmPlexArabic.className} min-h-screen bg-gray-950 text-white selection:bg-justefy-500/30`} dir="rtl">
       <Navbar />
       
-      {/* تم زيادة المساحة العلوية pt-32 وحركة دخول ناعمة للمحتوى */}
       <motion.div 
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
