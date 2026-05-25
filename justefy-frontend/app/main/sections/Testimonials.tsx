@@ -18,7 +18,7 @@ const testimonials = [
     role: "Founder - FashionHub",
     content: "فريق احترافي يفهم احتياجات السوق. الموقع الجديد زاد مبيعاتنا بنسبة 180% في الشهر الأول. أنصح بالتعامل معهم بشدة.",
     rating: 5,
-    avatar: "س",
+    avatar: "ك",
   },
   {
     id: 3,
