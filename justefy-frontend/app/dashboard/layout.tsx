@@ -22,17 +22,20 @@ export default function DashboardLayout({
 
   useEffect(() => {
     // التحقق الآمن بعد التأكد من أن الكود يعمل بالكامل على المتصفح
-    if (typeof window !== "undefined") {
-      const role = localStorage.getItem("user_role");
+
+    setIsAuthorized(true);
+  setCheckingAuth(false);
+    // if (typeof window !== "undefined") {
+    //   const role = localStorage.getItem("user_role");
       
-      if (role === "admin") {
-        setIsAuthorized(true);
-      } else {
-        setIsAuthorized(false);
-        router.replace("/"); // طرد المستخدم العادي للرئيسية
-      }
-      setCheckingAuth(false);
-    }
+    //   if (role === "admin") {
+    //     setIsAuthorized(true);
+    //   } else {
+    //     setIsAuthorized(false);
+    //     router.replace("/"); // طرد المستخدم العادي للرئيسية
+    //   }
+    //   setCheckingAuth(false);
+    // }
   }, [router]);
 
   // إذا جاري الفحص أو غير مصرح له، لا تعرض أي شيء في المتصفح لمنع الوميض أو الطردة المزدوجة
