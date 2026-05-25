@@ -21,26 +21,31 @@ export default function DashboardLayout({
   const [checkingAuth, setCheckingAuth] = useState(true);
 
   useEffect(() => {
-  if (typeof window !== "undefined") {
-    const role = localStorage.getItem("user_role");
-    if (role === "admin") {
-      setIsAuthorized(true);
-    } else {
-      setIsAuthorized(false);
-      router.replace("/auth/login"); // طرد مباشر لصفحة اللوجن
+    if (typeof window !== "undefined") {
+      const role = localStorage.getItem("user_role");
+      
+      // 🔒 قفل حماية صارم: إذا مش أدمن اطرده فوراً لصفحة الـ Login
+      if (role === "admin") {
+        setIsAuthorized(true);
+      } else {
+        setIsAuthorized(false);
+        router.replace("/auth/login"); 
+      }
+      setCheckingAuth(false);
     }
-    setCheckingAuth(false);
-  }
-}, [router]);
+  }, [router]);
 
-  // إذا جاري الفحص أو غير مصرح له، لا تعرض أي شيء في المتصفح لمنع الوميض أو الطردة المزدوجة
-  if (checkingAuth || !isAuthorized) {
+  // شاشة تحميل ناعمة أثناء فحص الأمان لمنع تسريب أي بيانات لو حاول مستخدم عادي الدخول
+  if (checkingAuth) {
     return (
-      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
-        <div className="w-8 h-8 border-4 border-justefy-500 border-t-transparent rounded-full animate-spin"></div>
+      <div className="min-h-screen bg-gray-950 flex items-center justify-center" dir="rtl">
+        <p className="text-gray-400 font-bold animate-pulse">جاري التحقق من صلاحيات الإدارة...</p>
       </div>
     );
   }
+
+  // إذا تم الفحص وطلع مش أدمن، مستحيل يعرض له محتوى الداشبورد
+  if (!isAuthorized) return null;
 
   return (
     <main className={`${ibmPlexArabic.className} min-h-screen bg-gray-950 text-white selection:bg-justefy-500/30`} dir="rtl">
