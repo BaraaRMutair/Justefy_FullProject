@@ -109,28 +109,64 @@ export default function Navbar() {
             </div>
 
             {/* Mobile Menu */}
-            <AnimatePresence>
-                {isMobileMenuOpen && (
-                    <motion.div
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: "auto" }}
-                        exit={{ opacity: 0, height: 0 }}
-                        className={`md:hidden border-t p-6 space-y-4 shadow-2xl ${isDashboard ? "bg-gray-950 text-white border-gray-800" : "bg-white"}`}
+         {/* Mobile Menu */}
+         
+<AnimatePresence>
+    {isMobileMenuOpen && (
+        <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className={`md:hidden border-t p-6 space-y-4 shadow-2xl ${isDashboard ? "bg-gray-950 text-white border-gray-800" : "bg-white border-gray-100"}`}
+        >
+            {/* الروابط العادية للموبايل */}
+            {!isDashboard && navLinks.map((link) => (
+                <Link 
+                    key={link.href} 
+                    href={link.href} 
+                    onClick={() => setIsMobileMenuOpen(false)} 
+                    className="block text-justefy-700 font-bold py-2 hover:text-justefy-500"
+                >
+                    {link.label}
+                </Link>
+            ))}
+
+            {/* زر لوحة الإدارة للموبايل إذا كان أدمن */}
+            {userRole === "admin" && (
+                <Link 
+                    href="/dashboard" 
+                    onClick={() => setIsMobileMenuOpen(false)} 
+                    className="block text-justefy-600 font-black border-t border-gray-100 pt-4"
+                >
+                    📊 لوحة الإدارة
+                </Link>
+            )}
+
+            {/* الأكاذيب البرمجية هان نضفناها: زر تسجيل الدخول أو الخروج للموبايل بدون تكرار */}
+            <div className="border-t border-gray-100 pt-4">
+                {!userRole ? (
+                    <Link 
+                        href="/auth/login" 
+                        onClick={() => setIsMobileMenuOpen(false)} 
+                        className="block w-full text-center py-3 bg-justefy-500 text-white font-bold rounded-2xl shadow-lg"
                     >
-                        {!isDashboard && navLinks.map((link) => (
-                            <Link key={link.href} href={link.href} onClick={() => setIsMobileMenuOpen(false)} className="block text-justefy-700 font-bold py-2">
-                                {link.label}
-                            </Link>
-                        ))}
-                        {userRole === "admin" && (
-                            <Link href="/dashboard" onClick={() => setIsMobileMenuOpen(false)} className="block text-justefy-600 font-black border-t border-gray-800 pt-4">
-                               لوحة الإدارة
-                            </Link>
-                        )}
-                        <button onClick={handleLogout} className="w-full text-center py-4 text-red-500 font-bold bg-red-500/5 rounded-2xl">خروج</button>
-                    </motion.div>
+                        تسجيل الدخول
+                    </Link>
+                ) : (
+                    <button 
+                        onClick={() => {
+                            handleLogout();
+                            setIsMobileMenuOpen(false);
+                        }} 
+                        className="w-full text-center py-3 text-red-500 font-bold bg-red-500/5 hover:bg-red-500/10 rounded-2xl transition-all"
+                    >
+                        خروج من الحساب
+                    </button>
                 )}
-            </AnimatePresence>
+            </div>
+        </motion.div>
+    )}
+</AnimatePresence>
         </motion.header>
     );
 }
