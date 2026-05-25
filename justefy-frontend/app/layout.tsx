@@ -1,60 +1,89 @@
 import "./globals.css";
 import type { Metadata } from "next";
-import { Inter, Poppins } from "next/font/google";
+import { Alexandria } from "next/font/google";
 
 import ConditionalLayout from "./main/components/ConditionalLayout";
 
-const inter = Inter({
-    subsets: ["latin"],
-    variable: "--font-inter",
-    display: "swap",
-});
-
-const poppins = Poppins({
-    subsets: ["latin"],
-    weight: ["300", "400", "500", "600", "700"],
-    variable: "--font-poppins",
+const alexandria = Alexandria({
+    subsets: ["arabic", "latin"],
+    weight: ["300", "400", "500", "600", "700", "800"],
+    variable: "--font-alexandria",
     display: "swap",
 });
 
 export const metadata: Metadata = {
-    title: "Justefy | Digital Marketing Agency",
+    metadataBase: new URL("https://justefy-frontend.vercel.app"),
+
+    title: {
+        default: "Justefy | Digital Marketing Agency",
+        template: "%s | Justefy",
+    },
+
     description:
-        "Justefy - Your premium digital marketing partner. Social Media Ads, Google Ads, SEO, Branding, and Web Development.",
+        "Justefy is a premium digital marketing agency specializing in Social Media Ads, Google Ads, SEO, Branding, and Web Development.",
+
     keywords: [
-        "digital marketing",
-        "social media ads",
-        "google ads",
-        "SEO",
-        "branding",
-        "web development",
         "Justefy",
+        "Digital Marketing",
+        "Social Media Ads",
+        "Google Ads",
+        "SEO",
+        "Branding",
+        "Web Development",
+        "Marketing Agency",
     ],
+
     authors: [{ name: "Justefy Agency" }],
+
+    creator: "Justefy Agency",
+
     openGraph: {
         title: "Justefy | Digital Marketing Agency",
-        description: "Premium digital marketing solutions for your business growth",
+        description:
+            "Premium digital marketing solutions designed to grow your business.",
+        url: "https://justefy-frontend.vercel.app",
+        siteName: "Justefy",
+        locale: "ar_AR",
         type: "website",
+    },
+
+    twitter: {
+        card: "summary_large_image",
+        title: "Justefy | Digital Marketing Agency",
+        description:
+            "Premium digital marketing solutions designed to grow your business.",
+    },
+
+    icons: {
+        icon: "/favicon.ico",
     },
 };
 
 export default function RootLayout({
     children,
-}: {
+}: Readonly<{
     children: React.ReactNode;
-}) {
+}>) {
     return (
         <html
             lang="ar"
             dir="rtl"
-            className={`${inter.variable} ${poppins.variable}`}
+            suppressHydrationWarning
+            className={alexandria.variable}
         >
-            <body className="font-sans bg-hero-gradient min-h-screen flex flex-col">
-
+            <body
+                className="
+                    font-sans
+                    antialiased
+                    bg-hero-gradient
+                    text-justefy-900
+                    min-h-screen
+                    overflow-x-hidden
+                "
+            >
                 <ConditionalLayout>
                     {children}
                 </ConditionalLayout>
-
             </body>
         </html>
     );
