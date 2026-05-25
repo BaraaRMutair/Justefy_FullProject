@@ -57,22 +57,27 @@ export default function LoginPage() {
             if (!res.ok) throw new Error(result.message || "فشل تسجيل الدخول");
 
             // ✅ حفظ البيانات والتوجه بشكل آمن وصارم
-            if (result.user) {
-                localStorage.setItem("user_role", result.user.role || "user");
-                
-                // حماية الاسم من الـ null
-                const safeName = result.user.name || result.user.fullName || "Baraa";
-                localStorage.setItem("user_name", safeName);
+            // ✅ داخل دالة onSubmit بعد نجاح الـ fetch واستلام الـ result
+if (result.user) {
+    // 1. زرع التوكن يدوياً في الكوكيز ليفهمه الـ Middleware (صلاحية لـ 7 أيام مثلاً)
+    if (result.token) {
+        document.cookie = `token=${result.token}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax;`;
+    }
 
-                // توجيه الأدمن وإيقاف بقية الدالة فوراً من خلال الـ return
-                if (result.user.role === 'admin') {
-                    window.location.href = "/dashboard";
-                    return; 
-                } else {
-                    window.location.href = "/";
-                    return;
-                }
-            }
+    // 2. حفظ بيانات الجلسة المعتادة
+    localStorage.setItem("user_role", result.user.role || "user");
+    const safeName = result.user.name || result.user.fullName || "Baraa";
+    localStorage.setItem("user_name", safeName);
+
+    // 3. التوجيه الصارم
+    if (result.user.role === 'admin') {
+        window.location.href = "/dashboard";
+        return; 
+    } else {
+        window.location.href = "/";
+        return;
+    }
+}
 
             // خطة بديلة صارمة في حال نجح الطلب ولم يرجع كائن مستخدم
             window.location.href = "/";
