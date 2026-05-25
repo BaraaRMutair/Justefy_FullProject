@@ -60,17 +60,27 @@ const onSubmit = async (data: LoginFormData) => {
 
         if (!res.ok) throw new Error(result.message || "فشل تسجيل الدخول");
 
-        // ✅ حفظ الرتبة والاسم لاستخدامهم في الـ Navbar والداشبورد
+        // ✅ حفظ البيانات والتوجه بشكل آمن وصارم
         if (result.user) {
-            localStorage.setItem("user_role", result.user.role);
-            localStorage.setItem("user_name", result.user.name);
+            localStorage.setItem("user_role", result.user.role || "admin");
+            
+            // حماية الاسم من الـ null: إذا رجع من السيرفر فاضي، نضع اسم افتراضي فوراً
+            const safeName = result.user.name || result.user.fullName || "Baraa";
+            localStorage.setItem("user_name", safeName);
 
-            window.location.href = result.user.role === 'admin' ? "/dashboard" : "/";
+            // توجيه الأدمن وإيقاف بقية الدالة فوراً من خلال الـ return
+            if (result.user.role === 'admin') {
+                window.location.href = "/dashboard";
+                return; 
+            } else {
+                window.location.href = "/";
+                return;
+            }
         }
 
-        // التوجه للرئيسية ليقرر الـ Navbar ما سيظهر
+        // في حال لم يكن هناك يوزر (خطة بديلة)
         router.push("/");
-        router.refresh(); // لتحديث حالة الـ Navbar فوراً
+        router.refresh();
 
     } catch (err: any) {
         setApiError(err.message);
@@ -78,7 +88,6 @@ const onSubmit = async (data: LoginFormData) => {
         setIsLoading(false);
     }
 };
-
     // ================= UI =================
     return (
         <motion.div
