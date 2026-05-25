@@ -20,16 +20,24 @@ export default function Navbar() {
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const [userRole, setUserRole] = useState<string | null>(null);
 
+    // 🔄 فحص وتحديث الـ Role بشكل ديناميكي عند تغيير المسار لضمان عدم التعليق على كاش قديم
     useEffect(() => {
-        setUserRole(localStorage.getItem("user_role"));
+        if (typeof window !== "undefined") {
+            setUserRole(localStorage.getItem("user_role"));
+        }
+    }, [pathname]); // يعيد الفحص فوراً أول ما يتغير الرابط
+
+    useEffect(() => {
         const handleScroll = () => setIsScrolled(window.scrollY > 50);
         window.addEventListener("scroll", handleScroll);
         return () => window.removeEventListener("scroll", handleScroll);
     }, []);
 
     const handleLogout = () => {
-        localStorage.clear();
-        window.location.href = "/";
+        if (typeof window !== "undefined") {
+            localStorage.clear();
+            window.location.href = "/";
+        }
     };
 
     return (
@@ -55,7 +63,6 @@ export default function Navbar() {
 
                     {/* Desktop Navigation */}
                     <nav className="hidden md:flex items-center gap-8">
-                        {/* لا تظهر الروابط العادية إذا كنا في الداشبورد لتقليل الزحمة */}
                         {!isDashboard && navLinks.map((link) => (
                             <Link key={link.href} href={link.href} className="text-sm font-bold text-justefy-700 hover:text-justefy-500 transition-colors">
                                 {link.label}
