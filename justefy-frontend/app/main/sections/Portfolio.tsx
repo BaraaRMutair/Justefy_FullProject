@@ -1,42 +1,45 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { ExternalLink, TrendingUp, Users, Eye } from "lucide-react";
+import { ExternalLink } from "lucide-react";
 import Image from "next/image";
 
 const portfolioItems = [
   {
     id: 1,
-    title: "حملة إطلاق منتج - TechStore",
+    title: "حملة إعلانية لمتجر إلكترونيات",
     category: "Meta Ads",
     image: "/images/portfolio-2.png",
-    stats: { reach: "2.4M", conversions: "12K", roi: "340%" },
     description:
-      "حملة إطلاق منتج جديد حققت 2.4 مليون وصول و12 ألف تحويل في أسبوعين فقط.",
+      "إدارة حملة إعلانية متكاملة على منصات Meta بهدف زيادة الوعي بالعلامة التجارية.",
+    services: ["إدارة الإعلانات", "استهداف الجمهور", "تحسين الأداء"],
   },
   {
     id: 2,
-    title: "موقع تجارة إلكترونية - FashionHub",
+    title: "متجر إلكتروني للملابس",
     category: "Web Development",
     image: "/images/portfolio-1.png",
-    stats: { reach: "150K", conversions: "8.5K", roi: "280%" },
-    description: "تصميم وتطوير متجر إلكتروني متكامل بمعدل تحويل 5.7%.",
+    description:
+      "تصميم وتطوير متجر إلكتروني متكامل مع تجربة استخدام سلسة ومتوافقة مع جميع الأجهزة.",
+    services: ["تصميم UI/UX", "تطوير المتجر", "تحسين السرعة"],
   },
   {
     id: 3,
-    title: "حملة SEO - MedicalPlus",
+    title: "تحسين ظهور موقع طبي",
     category: "SEO",
     image: "/images/portfolio-3.png",
-    stats: { reach: "500K", conversions: "3.2K", roi: "420%" },
-    description: "تصدر نتائج البحث لـ 45 كلمة مفتاحية في 3 أشهر.",
+    description:
+      "تنفيذ استراتيجية SEO لتحسين ظهور الموقع في نتائج البحث العضوية.",
+    services: ["SEO تقني", "تحسين المحتوى", "الكلمات المفتاحية"],
   },
   {
     id: 4,
-    title: "هوية بصرية - GreenCafe",
+    title: "هوية بصرية لشركة",
     category: "Branding",
     image: "/images/portfolio-4.png",
-    stats: { reach: "80K", conversions: "2.1K", roi: "190%" },
-    description: "تصميم هوية بصرية كاملة لسلسلة مقاهي ناشئة.",
+    description:
+      "تطوير هوية بصرية متكاملة تعكس شخصية العلامة التجارية.",
+    services: ["تصميم الشعار", "دليل الهوية", "المطبوعات"],
   },
 ];
 
@@ -53,12 +56,17 @@ export default function Portfolio() {
           className="text-center mb-16"
         >
           <span className="inline-block px-4 py-2 bg-justefy-100 rounded-full text-justefy-600 text-sm font-medium mb-4">
-            أعمالنا المُبهرة
-          </span>
+  نماذج من أعمالنا
+</span>
 
-          <h2 className="text-4xl md:text-5xl font-bold font-display text-justefy-900 mb-6">
-            نتائج تتحدث <span className="gradient-text">عن نفسها</span>
-          </h2>
+<h2 className="text-4xl md:text-5xl font-bold font-display text-justefy-900 mb-4">
+  مشاريع نفخر <span className="gradient-text">بتنفيذها</span>
+</h2>
+
+<p className="max-w-2xl mx-auto text-justefy-500 text-lg leading-relaxed">
+  مجموعة من المشاريع التي عملنا عليها في مجالات التسويق الرقمي وتطوير المواقع
+  وبناء الهويات البصرية.
+</p>
         </motion.div>
 
         {/* Grid */}
@@ -105,39 +113,18 @@ export default function Portfolio() {
                     {item.description}
                   </p>
 
-                  {/* Stats */}
-                  <div className="grid grid-cols-3 gap-4 mb-8">
-                    
-                    <div className="text-center p-3 bg-justefy-50 rounded-2xl border border-justefy-100/50">
-                      <Eye className="w-4 h-4 text-justefy-400 mx-auto mb-1" />
-                      <p className="text-lg font-bold text-justefy-800">
-                        {item.stats.reach}
-                      </p>
-                      <p className="text-[10px] uppercase tracking-wider text-justefy-400">
-                        وصول
-                      </p>
-                    </div>
-
-                    <div className="text-center p-3 bg-justefy-50 rounded-2xl border border-justefy-100/50">
-                      <Users className="w-4 h-4 text-justefy-400 mx-auto mb-1" />
-                      <p className="text-lg font-bold text-justefy-800">
-                        {item.stats.conversions}
-                      </p>
-                      <p className="text-[10px] uppercase tracking-wider text-justefy-400">
-                        تحويل
-                      </p>
-                    </div>
-
-                    <div className="text-center p-3 bg-justefy-50 rounded-2xl border border-justefy-100/50">
-                      <TrendingUp className="w-4 h-4 text-green-500 mx-auto mb-1" />
-                      <p className="text-lg font-bold text-green-600">
-                        {item.stats.roi}
-                      </p>
-                      <p className="text-[10px] uppercase tracking-wider text-justefy-400">
-                        عائد
-                      </p>
-                    </div>
-                  </div>
+               
+              <div className="flex flex-wrap gap-2 mb-8">
+                {item.services.map((service) => (
+                     <span
+                             key={service}
+                               className="px-3 py-2 bg-justefy-50 border border-justefy-100 rounded-full text-xs font-medium text-justefy-600"
+                                          >
+                                        {service}
+    
+  </span>
+  ))}
+</div>
 
                   {/* Button */}
                   <button className="w-full py-4 bg-justefy-50 text-justefy-600 rounded-2xl font-bold hover:bg-justefy-500 hover:text-white transition-all duration-300 flex items-center justify-center gap-2 group/btn">

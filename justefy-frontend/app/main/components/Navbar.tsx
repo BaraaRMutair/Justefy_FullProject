@@ -138,7 +138,7 @@ export default function Navbar() {
                     onClick={() => setIsMobileMenuOpen(false)} 
                     className="block text-justefy-600 font-black border-t border-gray-100 pt-4"
                 >
-                    📊 لوحة الإدارة
+                    لوحة الإدارة
                 </Link>
             )}
 
