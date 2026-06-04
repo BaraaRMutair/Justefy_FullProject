@@ -64,7 +64,7 @@ export default function EndScreen() {
 
     const whatsappMessage =
         encodeURIComponent(
-            `مرحباً Justefy 👋
+            `مرحباً Justefy 
 
 أنا ${leadData.name}
 

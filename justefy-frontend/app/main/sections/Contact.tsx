@@ -115,6 +115,9 @@ export default function Contact() {
                     mode: result?.mode || "created",
                     leadId: result?.leadId || null,
                     email,
+
+                    name: data.name,
+                    service: data.service,
                 })
             );
 

@@ -31,7 +31,7 @@ export default function SuccessPage() {
                 {/* Heading */}
                 <div className="text-center mb-10">
                     <h1 className="text-4xl font-black mb-4">
-                        تم تجهيز حسابك بنجاح 🚀
+                       تم تجهيز حسابك بنجاح 
                     </h1>
 
                     <p className="text-slate-400 leading-relaxed text-lg">
