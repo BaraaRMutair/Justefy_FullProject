@@ -10,6 +10,7 @@ const findLead = async (email) => {
   const cached = await redis.getLeadCache(email);
   if (cached?.leadId) return { id: cached.leadId };
 
+  // جلب الـ id والـ description لضمان عدم مسح البيانات القديمة عند التحديث
   const leads = await odoo.searchLead([
     ["email_from", "=", email],
   ]);
@@ -37,21 +38,27 @@ const upsertLead = async ({
 
   const existing = await findLead(email);
 
-  const payload = {
-    name: `${name || "Lead"} - ${service || "General"}`,
-    contact_name: name,
-    email_from: email,
-    description: `
-Source: ${source}
+  const newNotes = `
+-----------------------------------------
+[تحديث جديد - ${new Date().toLocaleDateString('ar-SA')}]
+Source: ${source || "Chatbot"}
 Service: ${service || "NOT_SET"}
-Notes: ${notes || ""}
-    `,
-  };
+Notes: ${notes || "بدون ملاحظات إضافية"}
+-----------------------------------------`;
 
   // UPDATE
   if (existing?.id) {
-    await odoo.updateLead(existing.id, payload);
+    // جلب الوصف القديم إذا كان موجوداً لمنع اختفائه في Odoo 19
+    const oldDescription = existing.description || "";
+    
+    const payload = {
+      name: `${name || "Lead"} - ${service || "General"}`,
+      contact_name: name,
+      email_from: email,
+      description: `${oldDescription}\n${newNotes}`, // دمج النوتس القديمة مع الجديدة
+    };
 
+    await odoo.updateLead(existing.id, payload);
     await redis.setLeadCache(email, existing.id);
 
     return {
@@ -62,8 +69,14 @@ Notes: ${notes || ""}
   }
 
   // CREATE
-  const id = await odoo.createLead(payload);
+  const payload = {
+    name: `${name || "Lead"} - ${service || "General"}`,
+    contact_name: name,
+    email_from: email,
+    description: newNotes,
+  };
 
+  const id = await odoo.createLead(payload);
   await redis.setLeadCache(email, id);
 
   return {

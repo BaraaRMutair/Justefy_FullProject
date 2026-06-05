@@ -2,20 +2,13 @@
 
 import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import {
-  MessageCircle,
-  X,
-  Send,
-  Minimize2,
-  Maximize2,
-  Zap,
-  Sparkles,
-} from "lucide-react";
+import { MessageCircle, X, Send, Minimize2, Maximize2, Zap, Sparkles } from "lucide-react";
 
 type Message = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  timestamp: Date;
 };
 
 export default function ChatBot() {
@@ -25,57 +18,54 @@ export default function ChatBot() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [userId, setUserId] = useState("");
+  const [isClosed, setIsClosed] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const [userId, setUserId] = useState("");
 
-  // mount + init
   useEffect(() => {
     setMounted(true);
-
     let id = localStorage.getItem("chat_user_id");
-
     if (!id) {
       id = crypto.randomUUID();
       localStorage.setItem("chat_user_id", id);
     }
-
     setUserId(id);
 
     const saved = localStorage.getItem("chat_messages");
+    const closedTime = localStorage.getItem("chat_closed_at");
+
+    if (closedTime) {
+      const timePast = Date.now() - new Date(closedTime).getTime();
+      if (timePast > 3600000) { 
+        localStorage.removeItem("chat_messages");
+        localStorage.removeItem("chat_closed_at");
+        setMessages([{ id: "welcome", role: "assistant", content: "مرحباً، كيف يمكننا مساعدتك اليوم؟", timestamp: new Date() }]);
+        setIsClosed(false);
+        return;
+      } else {
+        setIsClosed(true);
+      }
+    }
 
     if (saved) {
-      try {
-        setMessages(JSON.parse(saved));
-      } catch {
-        setMessages([
-          {
-            id: "welcome",
-            role: "assistant",
-            content: "مرحباً، كيف يمكننا مساعدتك اليوم؟",
-          },
-        ]);
+      try { 
+        const parsed = JSON.parse(saved).map((msg: any) => ({
+          ...msg,
+          timestamp: new Date(msg.timestamp)
+        }));
+        setMessages(parsed); 
+      } catch { 
+        setMessages([{ id: "welcome", role: "assistant", content: "مرحباً، كيف يمكننا مساعدتك اليوم؟", timestamp: new Date() }]);
       }
     } else {
-      setMessages([
-        {
-          id: "welcome",
-          role: "assistant",
-          content: "مرحباً، كيف يمكننا مساعدتك اليوم؟",
-        },
-      ]);
+      setMessages([{ id: "welcome", role: "assistant", content: "مرحباً، كيف يمكننا مساعدتك اليوم؟", timestamp: new Date() }]);
     }
   }, []);
 
-  // save messages
   useEffect(() => {
-    if (!mounted) return;
-
-    localStorage.setItem(
-      "chat_messages",
-      JSON.stringify(messages.slice(-20))
-    );
-
+    if (!mounted || messages.length === 0) return;
+    localStorage.setItem("chat_messages", JSON.stringify(messages.slice(-25)));
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, mounted]);
 
@@ -83,12 +73,13 @@ export default function ChatBot() {
 
   const sendMessage = async () => {
     const text = input.trim();
-    if (!text || isLoading) return;
+    if (!text || isLoading || isClosed) return;
 
     const userMsg: Message = {
       id: crypto.randomUUID(),
       role: "user",
       content: text,
+      timestamp: new Date()
     };
 
     setMessages((prev) => [...prev, userMsg]);
@@ -96,21 +87,24 @@ export default function ChatBot() {
     setIsLoading(true);
 
     try {
-      const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/chat`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId, message: text }),
-        }
-      );
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, message: text }),
+      });
 
       const data = await res.json();
+
+      if (data.status === "closed") {
+        setIsClosed(true);
+        localStorage.setItem("chat_closed_at", new Date().toISOString());
+      }
 
       const botMsg: Message = {
         id: crypto.randomUUID(),
         role: "assistant",
-        content: data.aiResponse || "لا يوجد رد",
+        content: data.aiResponse || "لا يوجد رد حالياً.",
+        timestamp: new Date()
       };
 
       setMessages((prev) => [...prev, botMsg]);
@@ -121,6 +115,7 @@ export default function ChatBot() {
           id: crypto.randomUUID(),
           role: "assistant",
           content: "عذراً، تعذر الاتصال حالياً.",
+          timestamp: new Date()
         },
       ]);
     } finally {
@@ -130,7 +125,6 @@ export default function ChatBot() {
 
   return (
     <div className="fixed bottom-6 left-6 z-50">
-      {/* Open Button */}
       <AnimatePresence>
         {!isOpen && (
           <motion.button
@@ -145,7 +139,6 @@ export default function ChatBot() {
         )}
       </AnimatePresence>
 
-      {/* Chat Window */}
       <AnimatePresence>
         {isOpen && (
           <motion.div
@@ -165,16 +158,10 @@ export default function ChatBot() {
                 <Zap className="w-5 h-5" />
                 <span className="font-bold text-sm">Justefy AI</span>
               </div>
-
               <div className="flex gap-2">
                 <button onClick={() => setIsMinimized(!isMinimized)}>
-                  {isMinimized ? (
-                    <Maximize2 className="w-4 h-4" />
-                  ) : (
-                    <Minimize2 className="w-4 h-4" />
-                  )}
+                  {isMinimized ? <Maximize2 className="w-4 h-4" /> : <Minimize2 className="w-4 h-4" />}
                 </button>
-
                 <button onClick={() => setIsOpen(false)}>
                   <X className="w-4 h-4" />
                 </button>
@@ -186,35 +173,14 @@ export default function ChatBot() {
                 {/* Messages */}
                 <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50">
                   {messages.map((m) => (
-                    <div
-                      key={m.id}
-                      className={`flex ${
-                        m.role === "user"
-                          ? "justify-end"
-                          : "justify-start"
-                      }`}
-                    >
-                      <div
-                        className={`p-3 rounded-2xl text-sm max-w-[80%] ${
-                          m.role === "user"
-                            ? "bg-justefy-500 text-white"
-                            : "bg-white text-black shadow"
-                        }`}
-                      >
-                        {m.role === "assistant" && (
-                          <Sparkles className="w-3 h-3 inline mr-1 text-justefy-400" />
-                        )}
+                    <div key={m.id} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+                      <div className={`p-3 rounded-2xl text-sm max-w-[80%] ${m.role === "user" ? "bg-justefy-500 text-white" : "bg-white text-black shadow"}`}>
+                        {m.role === "assistant" && <Sparkles className="w-3 h-3 inline mr-1 text-justefy-400" />}
                         {m.content}
                       </div>
                     </div>
                   ))}
-
-                  {isLoading && (
-                    <div className="text-xs text-gray-400">
-                      جاري التفكير...
-                    </div>
-                  )}
-
+                  {isLoading && <div className="text-xs text-gray-400 animate-pulse">جاري التفكير...</div>}
                   <div ref={messagesEndRef} />
                 </div>
 
@@ -223,16 +189,15 @@ export default function ChatBot() {
                   <input
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={(e) =>
-                      e.key === "Enter" && sendMessage()
-                    }
-                    className="flex-1 bg-gray-100 px-3 py-2 rounded-xl text-sm"
-                    placeholder="اسأل Justefy..."
+                    onKeyDown={(e) => e.key === "Enter" && !isClosed && !isLoading && sendMessage()}
+                    className="flex-1 bg-gray-100 px-3 py-2 rounded-xl text-sm disabled:opacity-50"
+                    placeholder={isClosed ? "المحادثة مغلقة حالياً..." : "اسأل Justefy..."}
+                    disabled={isClosed || isLoading}
                   />
-
                   <button
                     onClick={sendMessage}
-                    className="bg-justefy-500 text-white px-3 rounded-xl"
+                    disabled={isClosed || isLoading || !input.trim()}
+                    className="bg-justefy-500 text-white px-3 rounded-xl disabled:bg-gray-300 transition-colors"
                   >
                     <Send className="w-4 h-4" />
                   </button>

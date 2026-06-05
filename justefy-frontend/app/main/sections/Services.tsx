@@ -2,7 +2,7 @@
 
 import { motion } from "framer-motion";
 import { 
-  Share2, 
+  Megaphone,
   Search, 
   MessageCircle, 
   TrendingUp, 
@@ -10,9 +10,10 @@ import {
   Globe 
 } from "lucide-react";
 
+// مصفوفة الخدمات مدمج بها أيقونة Megaphone الجديدة
 const services = [
   {
-    icon: Share2,
+    icon: Megaphone,
     title: "إعلانات السوشيال ميديا",
     subtitle: "Meta & TikTok Ads",
     description: "حملات إعلانية مُحسّنة على فيسبوك، إنستغرام، وتيك توك تستهدف جمهورك بدقة وتُحقق أعلى معدلات التحويل.",
@@ -71,9 +72,7 @@ const containerVariants = {
   hidden: { opacity: 0 },
   visible: {
     opacity: 1,
-    transition: {
-      staggerChildren: 0.15,
-    },
+    transition: { staggerChildren: 0.15 },
   },
 };
 
@@ -88,23 +87,23 @@ const itemVariants = {
 
 export default function Services() {
   return (
-    <section id="services" className="section-padding relative">
-      <div className="max-w-7xl mx-auto px-6 lg:px-8">
+    <section id="services" className="py-20 relative clear-both">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Section Header */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
           transition={{ duration: 0.6 }}
-          className="text-center mb-20"
+          className="text-center mb-16"
         >
           <span className="inline-block px-4 py-2 bg-justefy-100 rounded-full text-justefy-600 text-sm font-medium mb-4">
             خدماتنا المتميزة
           </span>
-          <h2 className="text-4xl md:text-5xl font-bold font-display text-justefy-900 mb-6">
+          <h2 className="text-3xl md:text-5xl font-bold text-justefy-900 mb-6">
             نُدير كل شيء <span className="gradient-text">في مكان واحد</span>
           </h2>
-          <p className="text-lg text-justefy-500 max-w-2xl mx-auto">
+          <p className="text-base sm:text-lg text-justefy-500 max-w-2xl mx-auto px-2">
             من الإعلانات المدفوعة إلى التحسين العضوي، نقدم حلولًا متكاملة 
             تغطي كل احتياجاتك الرقمية باحترافية عالية.
           </p>
@@ -116,7 +115,7 @@ export default function Services() {
           initial="hidden"
           whileInView="visible"
           viewport={{ once: true, margin: "-100px" }}
-          className="grid md:grid-cols-2 lg:grid-cols-3 gap-8"
+          className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8"
         >
           {services.map((service) => (
             <motion.div
@@ -124,8 +123,7 @@ export default function Services() {
               variants={itemVariants}
               className="group relative"
             >
-              <div className="relative h-full glass-card rounded-3xl p-8 hover:shadow-2xl transition-all duration-500 hover:-translate-y-2 overflow-hidden">
-                {/* Background gradient on hover */}
+              <div className="relative h-full bg-white/70 backdrop-blur-md border border-gray-100 rounded-3xl p-6 sm:p-8 hover:shadow-2xl transition-all duration-500 hover:-translate-y-2 overflow-hidden">
                 <div className={`absolute inset-0 bg-gradient-to-br ${service.color} opacity-0 group-hover:opacity-5 transition-opacity duration-500`} />
                 
                 {/* Icon */}
@@ -140,7 +138,7 @@ export default function Services() {
                 <p className="text-sm text-justefy-400 mb-4 font-medium">
                   {service.subtitle}
                 </p>
-                <p className="text-justefy-600 leading-relaxed mb-6">
+                <p className="text-justefy-600 leading-relaxed mb-6 text-sm sm:text-base">
                   {service.description}
                 </p>
 
@@ -154,13 +152,6 @@ export default function Services() {
                       {feature}
                     </span>
                   ))}
-                </div>
-
-                {/* Arrow indicator */}
-                <div className="absolute top-8 left-8 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                  <div className="w-8 h-8 rounded-full bg-justefy-500 flex items-center justify-center">
-                    <TrendingUp className="w-4 h-4 text-white" />
-                  </div>
                 </div>
               </div>
             </motion.div>

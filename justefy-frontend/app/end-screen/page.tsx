@@ -22,11 +22,13 @@ export default function EndScreen() {
         useState<LeadData | null>(null);
 
     // ==========================================
-    // LOAD DATA
+    // LOAD DATA & FIX SCROLL
     // ==========================================
     useEffect(() => {
 
         try {
+            // إجبار المتصفح على الصعود لأعلى الصفحة فوراً لحل مشكلة التمرير المتبقي من الجوال
+            window.scrollTo(0, 0);
 
             const stored =
                 sessionStorage.getItem(
@@ -88,7 +90,7 @@ ${leadData.service}
     return (
         <main
             className="
-        min-h-screen
+        min-h-dvh         /* تم التعديل هنا لحساب ارتفاع الشاشة ديناميكياً مع متصفحات الجوال */
         bg-gradient-to-br
         from-black
         via-slate-950

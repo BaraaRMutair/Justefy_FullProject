@@ -99,7 +99,18 @@ const setProductsCache = async (products) => {
     3600 // كاش المنتجات لمدة ساعة
   );
 };
+const deleteSession = async (userId) => {
+  return redis.del(`session:${userId}`);
+};
 
+const setClosedSession = async (userId, session) => {
+  return redis.set(
+    `session:${userId}`,
+    JSON.stringify(session),
+    "EX",
+    60 * 60 // ساعة واحدة
+  );
+};
 // تصدير الدوال للاستخدام في الـ Controllers والـ Routes
 module.exports = {
   get,
@@ -112,4 +123,6 @@ module.exports = {
   setLeadCache,
   getProductsCache,
   setProductsCache,
+  deleteSession,
+  setClosedSession,
 };

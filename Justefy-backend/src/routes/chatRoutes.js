@@ -11,8 +11,7 @@ const validateChatInput = [
   body('message')
     .notEmpty()
     .withMessage('الرسالة لا يمكن أن تكون فارغة')
-    .trim()
-    .escape(),
+    .trim(), // 🚀 [تمت الإزالة]: أزلنا .escape() ليبقى النص العربي سليماً ومقروءاً للـ AI بنسبة 100%
   (req, res, next) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {

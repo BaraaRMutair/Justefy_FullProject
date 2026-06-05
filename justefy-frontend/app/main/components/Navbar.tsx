@@ -6,10 +6,10 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const navLinks = [
-    { href: "#services", label: "خدماتنا" },
-    { href: "#portfolio", label: "أعمالنا" },
-    { href: "#testimonials", label: "أراء العملاء" },
-    { href: "#contact", label: "تواصل معنا" },
+  { href: "/#services", label: "خدماتنا" },
+  { href: "/#portfolio", label: "أعمالنا" },
+  { href: "/#testimonials", label: "أراء العملاء" },
+  { href: "/#contact", label: "تواصل معنا" },
 ];
 
 export default function Navbar() {
@@ -20,12 +20,11 @@ export default function Navbar() {
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const [userRole, setUserRole] = useState<string | null>(null);
 
-    // 🔄 فحص وتحديث الـ Role بشكل ديناميكي عند تغيير المسار لضمان عدم التعليق على كاش قديم
     useEffect(() => {
         if (typeof window !== "undefined") {
             setUserRole(localStorage.getItem("user_role"));
         }
-    }, [pathname]); // يعيد الفحص فوراً أول ما يتغير الرابط
+    }, [pathname]);
 
     useEffect(() => {
         const handleScroll = () => setIsScrolled(window.scrollY > 50);
@@ -44,12 +43,13 @@ export default function Navbar() {
         <motion.header
             initial={{ y: -100 }}
             animate={{ y: 0 }}
-            className={`fixed top-0 left-0 right-0 z-50 transition-all duration-500 ${isScrolled
-                    ? (isDashboard ? "bg-gray-950/90 border-gray-800" : "bg-white/80 border-justefy-100") + " backdrop-blur-xl shadow-lg border-b"
-                    : "bg-transparent"
-                }`}
+            className={`fixed top-0 left-0 right-0 z-50 transition-all duration-500 ${
+                isScrolled || isMobileMenuOpen
+                    ? (isDashboard ? "bg-gray-950 border-gray-800" : "bg-white border-justefy-100") + " shadow-lg border-b"
+                    : "bg-white/90 md:bg-transparent"
+            }`}
         >
-            <div className="max-w-7xl mx-auto px-6 lg:px-8">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div className="flex items-center justify-between h-20">
                     {/* Logo - Justefy */}
                     <Link href="/" className="flex items-center gap-2 group">
@@ -69,7 +69,6 @@ export default function Navbar() {
                             </Link>
                         ))}
 
-                        {/* زر لوحة التحكم للأدمن فقط */}
                         {userRole === "admin" && (
                             <Link href="/dashboard" className={`flex items-center gap-2 text-sm font-bold px-5 py-2.5 rounded-2xl transition-all shadow-xl ${isDashboard
                                     ? "bg-white text-black hover:bg-gray-200"
@@ -102,71 +101,66 @@ export default function Navbar() {
                     </div>
 
                     {/* Mobile Toggle */}
-                    <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} className={`md:hidden p-2 ${isDashboard ? "text-white" : "text-justefy-700"}`}>
+                    <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} className={`md:hidden p-2 rounded-xl bg-gray-50 ${isDashboard ? "text-white bg-gray-900" : "text-justefy-700"}`}>
                         {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
                     </button>
                 </div>
             </div>
 
             {/* Mobile Menu */}
-         {/* Mobile Menu */}
-         
-<AnimatePresence>
-    {isMobileMenuOpen && (
-        <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            className={`md:hidden border-t p-6 space-y-4 shadow-2xl ${isDashboard ? "bg-gray-950 text-white border-gray-800" : "bg-white border-gray-100"}`}
-        >
-            {/* الروابط العادية للموبايل */}
-            {!isDashboard && navLinks.map((link) => (
-                <Link 
-                    key={link.href} 
-                    href={link.href} 
-                    onClick={() => setIsMobileMenuOpen(false)} 
-                    className="block text-justefy-700 font-bold py-2 hover:text-justefy-500"
-                >
-                    {link.label}
-                </Link>
-            ))}
-
-            {/* زر لوحة الإدارة للموبايل إذا كان أدمن */}
-            {userRole === "admin" && (
-                <Link 
-                    href="/dashboard" 
-                    onClick={() => setIsMobileMenuOpen(false)} 
-                    className="block text-justefy-600 font-black border-t border-gray-100 pt-4"
-                >
-                    لوحة الإدارة
-                </Link>
-            )}
-
-            {/* الأكاذيب البرمجية هان نضفناها: زر تسجيل الدخول أو الخروج للموبايل بدون تكرار */}
-            <div className="border-t border-gray-100 pt-4">
-                {!userRole ? (
-                    <Link 
-                        href="/auth/login" 
-                        onClick={() => setIsMobileMenuOpen(false)} 
-                        className="block w-full text-center py-3 bg-justefy-500 text-white font-bold rounded-2xl shadow-lg"
+            <AnimatePresence>
+                {isMobileMenuOpen && (
+                    <motion.div
+                        initial={{ opacity: 0, y: -10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -10 }}
+                        className={`md:hidden border-t p-6 space-y-4 shadow-2xl absolute left-0 right-0 top-20 z-50 ${isDashboard ? "bg-gray-950 text-white border-gray-800" : "bg-white border-gray-100"}`}
                     >
-                        تسجيل الدخول
-                    </Link>
-                ) : (
-                    <button 
-                        onClick={() => {
-                            handleLogout();
-                            setIsMobileMenuOpen(false);
-                        }} 
-                        className="w-full text-center py-3 text-red-500 font-bold bg-red-500/5 hover:bg-red-500/10 rounded-2xl transition-all"
-                    >
-                        خروج من الحساب
-                    </button>
+                        {!isDashboard && navLinks.map((link) => (
+                            <Link 
+                                key={link.href} 
+                                href={link.href} 
+                                onClick={() => setIsMobileMenuOpen(false)} 
+                                className="block text-justefy-700 font-bold py-2 hover:text-justefy-500 border-b border-gray-50"
+                            >
+                                {link.label}
+                            </Link>
+                        ))}
+
+                        {userRole === "admin" && (
+                            <Link 
+                                href="/dashboard" 
+                                onClick={() => setIsMobileMenuOpen(false)} 
+                                className="block text-justefy-600 font-black pt-2"
+                            >
+                                لوحة الإدارة
+                            </Link>
+                        )}
+
+                        <div className="pt-2">
+                            {!userRole ? (
+                                <Link 
+                                    href="/auth/login" 
+                                    onClick={() => setIsMobileMenuOpen(false)} 
+                                    className="block w-full text-center py-3 bg-justefy-500 text-white font-bold rounded-2xl shadow-lg"
+                                >
+                                    تسجيل الدخول
+                                </Link>
+                            ) : (
+                                <button 
+                                    onClick={() => {
+                                        handleLogout();
+                                        setIsMobileMenuOpen(false);
+                                    }} 
+                                    className="w-full text-center py-3 text-red-500 font-bold bg-red-500/5 hover:bg-red-500/10 rounded-2xl transition-all"
+                                >
+                                    خروج من الحساب
+                                </button>
+                            )}
+                        </div>
+                    </motion.div>
                 )}
-            </div>
-        </motion.div>
-    )}
-</AnimatePresence>
+            </AnimatePresence>
         </motion.header>
     );
 }

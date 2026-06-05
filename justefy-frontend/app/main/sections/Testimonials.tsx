@@ -59,12 +59,12 @@ export default function Testimonials() {
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
               transition={{ duration: 0.6, delay: index * 0.15 }}
-              className="relative"
+              className="relative mt-4" /* أضفت هُنا هامش بسيط علوي بسبب خروج الأيقونة */
             >
-              <div className="glass-card rounded-3xl p-8 h-full flex flex-col">
-                {/* Quote Icon */}
-                <div className="absolute -top-4 -right-4 w-12 h-12 bg-justefy-500 rounded-2xl flex items-center justify-center shadow-lg">
-                  <Quote className="w-6 h-6 text-white" />
+              <div className="glass-card rounded-3xl p-8 h-full flex flex-col bg-white/80 border border-white/20 shadow-md">
+                {/* Quote Icon - تم نقلها لليسار لتناسب العربي */}
+                <div className="absolute -top-4 -left-4 w-12 h-12 bg-justefy-500 rounded-2xl flex items-center justify-center shadow-lg z-10">
+                  <Quote className="w-6 h-6 text-white transform scale-x-[-1]" />
                 </div>
 
                 {/* Rating */}
