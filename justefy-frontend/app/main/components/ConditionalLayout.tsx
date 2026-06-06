@@ -8,7 +8,6 @@ import ChatBot from "./ChatBot";
 export default function ConditionalLayout({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
 
-   
     const isAuth =
         pathname === "/auth/login" ||
         pathname === "/auth/register";
@@ -19,11 +18,11 @@ export default function ConditionalLayout({ children }: { children: React.ReactN
     }
 
     return (
-        <>
+        <div className="flex flex-col min-h-screen">
             <Navbar />
             <main className="flex-1">{children}</main>
             <Footer />
             <ChatBot />
-        </>
+        </div>
     );
 }

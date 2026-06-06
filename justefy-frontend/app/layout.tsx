@@ -43,7 +43,7 @@ export const metadata: Metadata = {
             "Premium digital marketing solutions designed to grow your business.",
         url: "https://justefy-frontend.vercel.app",
         siteName: "Justefy",
-        locale: "ar_AR",
+        locale: "ar_SA", // ✅ تم التصحيح
         type: "website",
     },
 
@@ -79,6 +79,7 @@ export default function RootLayout({
                     text-justefy-900
                     min-h-screen
                     overflow-x-hidden
+                    touch-pan-y
                 "
             >
                 <ConditionalLayout>

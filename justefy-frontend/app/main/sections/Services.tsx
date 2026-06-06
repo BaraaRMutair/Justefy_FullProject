@@ -87,8 +87,8 @@ const itemVariants = {
 
 export default function Services() {
   return (
-    <section id="services" className="py-20 relative clear-both">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+<section id="services" className="scroll-mt-20 sm:scroll-mt-24 py-12 sm:py-16 md:py-20 relative clear-both">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Section Header */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -100,9 +100,10 @@ export default function Services() {
           <span className="inline-block px-4 py-2 bg-justefy-100 rounded-full text-justefy-600 text-sm font-medium mb-4">
             خدماتنا المتميزة
           </span>
-          <h2 className="text-3xl md:text-5xl font-bold text-justefy-900 mb-6">
-            نُدير كل شيء <span className="gradient-text">في مكان واحد</span>
-          </h2>
+        
+<h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold leading-normal tracking-wide text-justefy-900 mb-4 sm:mb-6">
+    نُدير كل شيء <span className="gradient-text">في مكان واحد</span>
+</h2>
           <p className="text-base sm:text-lg text-justefy-500 max-w-2xl mx-auto px-2">
             من الإعلانات المدفوعة إلى التحسين العضوي، نقدم حلولًا متكاملة 
             تغطي كل احتياجاتك الرقمية باحترافية عالية.
