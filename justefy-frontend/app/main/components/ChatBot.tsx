@@ -23,7 +23,7 @@ export default function ChatBot() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
+useEffect(() => {
     setMounted(true);
     let id = localStorage.getItem("chat_user_id");
     if (!id) {
@@ -37,13 +37,23 @@ export default function ChatBot() {
 
     if (closedTime) {
       const timePast = Date.now() - new Date(closedTime).getTime();
+      
+      // ⏳ إذا مر أكثر من ساعة كاملة (3600000 مللي ثانية) على قفل المحادثة:
       if (timePast > 3600000) { 
+        // تنظيف الكاش القديم بالكامل لفتح جلسة جديدة ونظيفة
         localStorage.removeItem("chat_messages");
         localStorage.removeItem("chat_closed_at");
+        localStorage.removeItem("chat_user_id"); // 👈 حذفه هنا هو السر عشان الريدز ما يقرأ نفس الجلسة المغلقة
+        
+        const newId = crypto.randomUUID();
+        localStorage.setItem("chat_user_id", newId);
+        setUserId(newId);
+        
         setMessages([{ id: "welcome", role: "assistant", content: "مرحباً، كيف يمكننا مساعدتك اليوم؟", timestamp: new Date() }]);
         setIsClosed(false);
         return;
       } else {
+        // إذا لسه ما مرت الساعة، اترك المحادثة مقفلة بوجهه شمع أحمر
         setIsClosed(true);
       }
     }
@@ -71,7 +81,7 @@ export default function ChatBot() {
 
   if (!mounted) return null;
 
-  const sendMessage = async () => {
+const sendMessage = async () => {
     const text = input.trim();
     if (!text || isLoading || isClosed) return;
 
@@ -95,11 +105,25 @@ export default function ChatBot() {
 
       const data = await res.json();
 
+      // 🚨 صمام الأمان الحقيقي: إذا أغلقت الجلسة، اقفل الواجهة فوراً ولا تفتح شيئاً!
       if (data.status === "closed") {
+        const botMsg: Message = {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: data.aiResponse || "تم إنهاء المحادثة وتحويل طلبكم للفريق.",
+          timestamp: new Date()
+        };
+        
+        setMessages((prev) => [...prev, botMsg]);
+        setIsLoading(false);
+        
+        // 🛑 نقفل الشات بوجهه شمع أحمر ونعطل الإدخال فوراً في جميع حالات الإغلاق (حظر أو نفاد توكنز)
         setIsClosed(true);
         localStorage.setItem("chat_closed_at", new Date().toISOString());
+        return; 
       }
 
+      // المسار الطبيعي المستمر
       const botMsg: Message = {
         id: crypto.randomUUID(),
         role: "assistant",

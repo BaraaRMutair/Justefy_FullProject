@@ -35,7 +35,6 @@ ${odooData || "لا توجد بيانات حالية"}
         role: m.role === "ai" || m.role === "assistant" ? "assistant" : "user", 
         content: m.text || m.content || "" 
       })),
-      { role: "user", content: userMessage }
     ];
 
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
