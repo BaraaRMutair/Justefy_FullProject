@@ -3,8 +3,8 @@ const { upsertLead } = require("../services/leadService");
 const redis = require("../services/redisService");
 const { getProductsCached } = require("../services/productService");
 
-const MAX_MESSAGES = 2; // للفحص: رسالتين كحد أقصى طوال الجلسة
-const MAX_TOKENS = 5000;
+const MAX_MESSAGES = 25; // للفحص: رسالتين كحد أقصى طوال الجلسة
+const MAX_TOKENS = 10000;
 
 // =========================
 // HELPERS
