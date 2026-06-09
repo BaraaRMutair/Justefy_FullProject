@@ -123,9 +123,10 @@ const extractJsonObject = (content) => {
 const normalizeAiResult = (parsed, raw = "") => {
   const evaluation = forceNormalizeEval(parsed?.evaluation, raw);
 
-  const aiResponse =
-    safeContent(parsed?.aiResponse) ||
-    "مرحباً 👋 كيف يمكنني مساعدتك في خدمات Justefy؟";
+ const aiResponse =
+  parsed?.aiResponse?.trim?.() ||
+  raw?.trim?.() ||
+  "مرحباً 👋 كيف يمكنني مساعدتك في خدمات Justefy؟";
 
   return {
     evaluation,
@@ -155,7 +156,7 @@ const callOpenRouter = async (messages) => {
         model: DEFAULT_MODEL,
         messages,
         temperature: 0,
-        response_format: { type: "json_object" },
+       
       }),
     });
 
@@ -203,7 +204,13 @@ const getAIResponse = async (
     const raw =
       data?.choices?.[0]?.message?.content || "";
 
-    const parsed = extractJsonObject(raw);
+   const parsed = (() => {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+})();
 
     const normalized = normalizeAiResult(parsed, raw);
 

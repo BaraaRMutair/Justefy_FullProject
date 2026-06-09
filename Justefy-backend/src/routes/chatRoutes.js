@@ -26,4 +26,5 @@ const validateChatInput = [
 
 router.post('/', validateChatInput, handleChat);
 
+
 module.exports = router;

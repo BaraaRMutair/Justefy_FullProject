@@ -72,31 +72,32 @@ const setClosedSession = async (userId, session) => {
  * Redis WATCH makes EXEC return null so the caller can fail safely instead of
  * overwriting newer chat state.
  */
-const saveSessionLocked = async (userId, session, expectedVersion = 1, messageId = null, ttl = SESSION_TTL_SECONDS) => {
+const saveSessionLocked = async (
+  userId,
+  session,
+  expectedVersion = 1,
+  messageId = null,
+  ttl = SESSION_TTL_SECONDS
+) => {
   const key = sessionKey(userId);
 
-  await redis.watch(key);
-  const currentRaw = await redis.get(key);
-  const current = safeJsonParse(currentRaw, null);
-
-  if (messageId && current?._committedMessageId === messageId) {
-    await redis.unwatch();
-    return true;
-  }
-
-  const currentVersion = Number(current?._version || 1);
-  if (current && Number(expectedVersion || 1) !== currentVersion) {
-    await redis.unwatch();
-    return false;
-  }
-
-  const multi = redis.multi();
-  multi.set(key, JSON.stringify(session), "EX", ttl);
-  const result = await multi.exec();
-  return result !== null;
+  return redis.set(
+    key,
+    JSON.stringify(session),
+    "EX",
+    ttl
+  );
 };
-
 const isLocked = async (email) => {
   if (!email) return false;
   return Boolean(await redis.get(lockKey(email)));
+};
+
+module.exports = {
+  getSession,
+  setSession,
+  deleteSession,
+  setClosedSession,
+  saveSessionLocked,
+  isLocked,
 };

@@ -145,8 +145,9 @@ const extractFirstContact = (message = "") => {
   if (emailMatch) {
     return { isValid: true, matchedValue: emailMatch[0], type: "email", words: cleanMessage.split(/\s+/) };
   }
-  const phoneMatch = cleanMessage.match(/\+?[0-9][0-9\s-]{6,}/);
-  if (phoneMatch) {
+const phoneMatch = cleanMessage.match(/(?:\+?\d{1,3}[\s-]?)?\d{7,14}/);
+
+if (phoneMatch) {
     const normalized = phoneMatch[0].replace(/[\s-]/g, "");
     return { isValid: true, matchedValue: normalized, type: "phone", words: cleanMessage.split(/\s+/) };
   }
@@ -154,7 +155,11 @@ const extractFirstContact = (message = "") => {
 };
 
 const extractNameWithoutContact = (words = []) =>
-  words.filter((word) => !isValidEmailOrPhone(word).isValid).join(" ").trim();
+  words
+    .filter((word) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(word))
+    .filter((word) => !/^\+?[0-9][0-9\s-]{6,}$/.test(word))
+    .join(" ")
+    .trim();
 
 const formatChatHistoryForOdoo = (historyArray = []) => {
   const cleanHistory = sanitizeHistory(historyArray);
@@ -249,6 +254,7 @@ const buildProductsContext = async () => {
     return "";
   }
 };
+
 
 const closeChat = async (userId, session, reason = "auto_close", lastAiMessage = "") => {
   let updatedSession = clone(session);
@@ -522,7 +528,7 @@ const handleChat = async (req, res) => {
 
 const startFunnel =
   isHotIntent &&
-  currentSession.lead.score >= 3
+  currentSession.lead.score >= 3 &&
   currentSession.step === null &&
   !(currentSession.lead.name && (currentSession.lead.email || currentSession.lead.phone));
     if (startFunnel) {
@@ -587,20 +593,26 @@ const startFunnel =
 
     // Default AI response path (could call getAIResponse if needed)
     // For INFO intents we can use a lightweight template; for WARM/HOT we can call AI for richer reply
-   let aiResponse;
+   const odooData = await buildProductsContext();
+
+   let aiResponse = "أهلاً 👋 كيف أقدر أساعدك؟";
 
 // 1) HOT → funnel أو AI قوي
 if (intent === "HOT") {
   aiResponse = "أرى اهتمام واضح 👍";
 }
+
+
 // 2) WARM → AI عادي (أفضل تجربة)
+
 else if (intent === "WARM") {
   const ai = await getAIResponse({
     history: sanitizeHistory(currentSession.history).slice(-10),
     userMessage: cleanMessage,
+    odooData
   });
 
-  aiResponse = ai.aiResponse;
+  aiResponse = ai?.aiResponse || "لا أستطيع الرد حالياً، حاول لاحقاً.";
 }
 
 // 3) INFO → AI خفيف أو fallback
@@ -610,15 +622,18 @@ else {
     userMessage: cleanMessage,
   });
 
-  aiResponse = ai.aiResponse;
+  aiResponse = ai?.aiResponse || "مرحباً 👋 كيف أقدر أساعدك؟";
+
 }
+    console.log("🧠 AI CALL START");
 
     currentSession = appendMessageToSession(currentSession, "assistant", aiResponse);
+    console.log("📦 SESSION:", currentSession);
     await persistSessionAtomically(userId, currentSession, messageId);
     return res.json({ status: "ok", aiResponse });
   } catch (error) {
-    console.error("[ChatController] handleChat error:", error.message || error);
-    return res.status(500).json({ status: "error", aiResponse: "حدث خطأ داخلي، يرجى المحاولة لاحقاً." });
+    console.error("🔥 FULL ERROR:", error.stack || error);
+    return res.status(500).json({ status: "error", aiResponse: "حدث خطأ داخلي داخلي داخلي، يرجى المحاولة لاحقاً." });
   }
 };
 
