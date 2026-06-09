@@ -110,6 +110,19 @@ const setProductsCache = async (
     ttl
   );
 };
+const getLeadCache = async (email) => {
+  const data = await redis.get(leadKey(email));
+  return safeJsonParse(data, null);
+};
+
+const setLeadCache = async (email, leadId) => {
+  return redis.set(
+    leadKey(email),
+    JSON.stringify({ leadId }),
+    "EX",
+    LEAD_CACHE_TTL_SECONDS
+  );
+};
 module.exports = {
   getSession,
   setSession,
@@ -119,4 +132,6 @@ module.exports = {
   isLocked,
   getProductsCache,
   setProductsCache,
+  getLeadCache,
+  setLeadCache,
 };

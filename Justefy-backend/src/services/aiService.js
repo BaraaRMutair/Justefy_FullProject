@@ -14,9 +14,11 @@ const AI_EVAL = Object.freeze({
   KICK: "kick",
 });
 
-const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+//const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+const GEMINI_URL =
+  "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
 const DEFAULT_MODEL =
-  process.env.OPENROUTER_MODEL || "anthropic/claude-3-haiku";
+  process.env.OPENROUTER_MODEL ||"gemini-2.5-flash";
 const REQUEST_TIMEOUT_MS = Number(process.env.AI_TIMEOUT_MS || 20000);
 
 const safeContent = (v) => (typeof v === "string" ? v.trim() : "");
@@ -144,41 +146,63 @@ const normalizeAiResult = (parsed, raw = "") => {
 // ─────────────────────────────
 // OPENROUTER CALL
 // ─────────────────────────────
-const callOpenRouter = async (messages) => {
-  const controller = new AbortController();
-  const timeout = setTimeout(
-    () => controller.abort(),
-    REQUEST_TIMEOUT_MS
-  );
+// const callOpenRouter = async (messages) => {
+//   const controller = new AbortController();
+//   const timeout = setTimeout(
+//     () => controller.abort(),
+//     REQUEST_TIMEOUT_MS
+//   );
 
-  try {
-    const res = await fetch(OPENROUTER_URL, {
-      method: "POST",
-      signal: controller.signal,
-      headers: {
-        Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: DEFAULT_MODEL,
-        messages,
-        temperature: 0,
+//   try {
+//     const res = await fetch(OPENROUTER_URL, {
+//       method: "POST",
+//       signal: controller.signal,
+//       headers: {
+//         Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+//         "Content-Type": "application/json",
+//       },
+//       body: JSON.stringify({
+//         model: DEFAULT_MODEL,
+//         messages,
+//         temperature: 0,
        
-      }),
-    });
+//       }),
+//     });
 
-    const data = await res.json().catch(() => ({}));
+//     const data = await res.json().catch(() => ({}));
 
-    if (!res.ok) {
-      throw new Error(
-        `OpenRouter error: ${res.status} ${JSON.stringify(data)}`
-      );
-    }
+//     if (!res.ok) {
+//       throw new Error(
+//         `OpenRouter error: ${res.status} ${JSON.stringify(data)}`
+//       );
+//     }
 
-    return data;
-  } finally {
-    clearTimeout(timeout);
-  }
+//     return data;
+//   } finally {
+//     clearTimeout(timeout);
+//   }
+// };
+const callGemini = async (messages) => {
+  const res = await fetch(`${GEMINI_URL}?key=${process.env.GEMINI_API_KEY}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      contents: messages.map(m => ({
+        role: m.role === "assistant" ? "model" : "user",
+        parts: [{ text: m.content }],
+      })),
+    }),
+  });
+
+  const data = await res.json();
+
+  const text =
+    data?.candidates?.[0]?.content?.parts?.[0]?.text ||
+    "ما قدرت أجيب رد حالياً";
+
+  return { aiResponse: text };
 };
 
 // ─────────────────────────────
@@ -189,11 +213,17 @@ const getAIResponse = async (
   retries = 2
 ) => {
   try {
+    // const messages = [
+    //   {
+    //     role: "system",
+    //     content: buildSystemInstruction(odooData),
+    //   },
+
     const messages = [
-      {
-        role: "system",
-        content: buildSystemInstruction(odooData),
-      },
+  {
+    role: "user",
+    content: "SYSTEM:\n" + buildSystemInstruction(odooData),
+  },
 
       ...history.slice(-5).map((m) => ({
         role: normalizeHistoryRole(m.role),
@@ -206,7 +236,8 @@ const getAIResponse = async (
       },
     ];
 
-    const data = await callOpenRouter(messages);
+    //const data = await callOpenRouter(messages);
+    const data = await callGemini(messages);
 
     const raw =
       data?.choices?.[0]?.message?.content || "";
