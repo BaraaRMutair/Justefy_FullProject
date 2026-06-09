@@ -1,437 +1,631 @@
-const { getAIResponse } = require("../services/aiService");
+/**
+ * ChatController.improved.js
+ * ─────────────────────────────────────────────────────────────────
+ * تحسينات رئيسية:
+ *  - إصلاح تكرار منطق funnel trigger
+ *  - إزالة حساب score المزدوج والاحتفاظ بتحديث واحد فقط
+ *  - إعادة تعريف hasExplicitBuyingIntent واستخدامها في قرار بدء الفانل
+ *  - إعادة ترتيب التنفيذ: classifyIntent -> update score -> funnel decision -> state machine / AI
+ *  - تبسيط استخدام regex (إزالة الازدواجية في toLowerCase + /i)
+ *  - تنظيف نهاية السلسلة المقطوعة وتصحيح الردود النهائية
+ * ─────────────────────────────────────────────────────────────────
+ */
+
+const { getAIResponse, AI_EVAL } = require("../services/aiService");
 const { upsertLead } = require("../services/leadService");
 const redis = require("../services/redisService");
 const { getProductsCached } = require("../services/productService");
 
-const MAX_MESSAGES = 25; 
+const MAX_USER_MESSAGES = 25;
 const MAX_TOKENS = 10000;
-const ONE_HOUR = 60 * 60 * 1000; 
+const ONE_HOUR_MS = 60 * 60 * 1000;
+const INACTIVITY_RESET_MS = 15 * 60 * 1000;
+const DECAY_TIME_WINDOW_MS = 5 * 60 * 1000;
+const HISTORY_CAP = 40;
+
+// ─────────────────────────────────────────────────────────────────
+// STATES & TERMINALS
+// ─────────────────────────────────────────────────────────────────
+const STATES = Object.freeze({
+  INTENT_CONFIRM: "intent_confirm",
+  LEAD_NAME: "lead_name",
+  LEAD_CONTACT: "lead_contact",
+  FORCE_COLLECT: "force_collect",
+  COLLECT_BEFORE_CLOSE: "collect_before_close",
+});
+
+const TERMINAL_STEPS = Object.freeze({
+  CLOSE_FORM_COMPLETED: "close_form_completed",
+  CLOSE_TOKEN_EXHAUSTED: "close_token_exhausted",
+  CLOSE_MISBEHAVE: "close_misbehave",
+});
+
+// ─────────────────────────────────────────────────────────────────
+// HELPERS
+// ─────────────────────────────────────────────────────────────────
+const clone = (value) => structuredClone(value);
+const normalizeText = (value = "") => String(value || "").toLowerCase().trim();
+
+const normalizeSession = (rawSession) => {
+  const session = rawSession ? clone(rawSession) : {};
+  session._version = Number(session._version || 1);
+  session._committedMessageId = session._committedMessageId || null;
+  session.status = session.status || "open";
+  session.step = session.step || null;
+  session.behaviorWarnings = Number(session.behaviorWarnings || 0);
+  session.lastUserMessage = session.lastUserMessage || "";
+  session.lead = session.lead || {};
+  session.lead.interests = Array.isArray(session.lead.interests) ? session.lead.interests : [];
+  session.lead.score = Number(session.lead.score || 0);
+  session.lead.name = session.lead.name || null;
+  session.lead.email = session.lead.email || null;
+  session.lead.phone = session.lead.phone || null;
+  session.history = Array.isArray(session.history) ? session.history : [];
+  session.stats = session.stats || {};
+  session.stats.userMessagesCount = Number(session.stats.userMessagesCount || 0);
+  session.stats.messagesCount = Number(session.stats.messagesCount || 0);
+  session.stats.totalTurns = Number(session.stats.totalTurns || 0);
+  session.stats.totalTokens = Number(session.stats.totalTokens || 0);
+  session.stats.startedAt = Number(session.stats.startedAt || Date.now());
+  session.stats.lastActivity = Number(session.stats.lastActivity || Date.now());
+  return session;
+};
+
+const sanitizeHistory = (historyArray = []) => {
+  if (!Array.isArray(historyArray)) return [];
+  return historyArray
+    .map((message) => ({
+      role: message.role === "ai" || message.role === "assistant" ? "assistant" : "user",
+      content: String(message.content || message.text || "").trim(),
+      timestamp: Number(message.timestamp || Date.now()),
+    }))
+    .filter((message) => message.content);
+};
+
+const appendMessageToSession = (session, role, content, messageId = null) => {
+  const updatedSession = clone(session);
+  const normalizedRole = role === "ai" ? "assistant" : role;
+  const normalizedContent = String(content || "").trim();
+  if (!normalizedContent) return updatedSession;
+  if (normalizedRole === "user" && messageId) {
+    updatedSession._committedMessageId = messageId;
+  }
+  updatedSession.history = sanitizeHistory(updatedSession.history);
+  updatedSession.history.push({ role: normalizedRole, content: normalizedContent, timestamp: Date.now() });
+  if (updatedSession.history.length > HISTORY_CAP) {
+    updatedSession.history = updatedSession.history.slice(-HISTORY_CAP);
+  }
+  updatedSession.stats.messagesCount += 1;
+  if (normalizedRole === "user") {
+    updatedSession.stats.userMessagesCount += 1;
+    updatedSession.stats.totalTurns += 1;
+    updatedSession.lastUserMessage = normalizeText(normalizedContent);
+  }
+  updatedSession.stats.lastActivity = Date.now();
+  return updatedSession;
+};
+
+const persistSessionAtomically = async (userId, session, messageId = null) => {
+  const updatedSession = clone(session);
+  const currentVersion = Number(updatedSession._version || 1);
+  updatedSession._version = currentVersion + 1;
+  const saved = await redis.saveSessionLocked(userId, updatedSession, currentVersion, messageId);
+  if (!saved) {
+    throw new Error(`Concurrent session write rejected for userId=${userId}, messageId=${messageId || "none"}`);
+  }
+  return updatedSession;
+};
+
+const applyScoreDecay = (session) => {
+  const updatedSession = clone(session);
+  const now = Date.now();
+  const idleTime = now - Number(updatedSession.stats.lastActivity || now);
+  if (idleTime > DECAY_TIME_WINDOW_MS && updatedSession.lead.score > 0) {
+    const decayPoints = Math.floor(idleTime / DECAY_TIME_WINDOW_MS);
+    updatedSession.lead.score = Math.max(0, updatedSession.lead.score - decayPoints);
+  }
+  return updatedSession;
+};
 
 const isValidEmailOrPhone = (word = "") => {
-  const cleanWord = word.trim();
-  const normalized = cleanWord.replace(/\s+/g, ""); 
-  
+  const cleanWord = String(word || "").trim();
+  const normalizedPhone = cleanWord.replace(/[\s-]/g, "");
   const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanWord);
-  const isPhone = /^\+?[0-9]{7,15}$/.test(normalized); 
-  
+  const isPhone = /^\+?[0-9]{7,15}$/.test(normalizedPhone);
   return {
     isValid: isEmail || isPhone,
-    matchedValue: isEmail ? cleanWord : normalized,
-    type: isEmail ? "email" : "phone"
+    matchedValue: isEmail ? cleanWord : normalizedPhone,
+    type: isEmail ? "email" : "phone",
   };
 };
 
+const extractFirstContact = (message = "") => {
+  const cleanMessage = String(message || "");
+  const emailMatch = cleanMessage.match(/[^\s@]+@[^\s@]+\.[^\s@]+/);
+  if (emailMatch) {
+    return { isValid: true, matchedValue: emailMatch[0], type: "email", words: cleanMessage.split(/\s+/) };
+  }
+  const phoneMatch = cleanMessage.match(/\+?[0-9][0-9\s-]{6,}/);
+  if (phoneMatch) {
+    const normalized = phoneMatch[0].replace(/[\s-]/g, "");
+    return { isValid: true, matchedValue: normalized, type: "phone", words: cleanMessage.split(/\s+/) };
+  }
+  return { isValid: false, words: cleanMessage.split(/\s+/) };
+};
+
+const extractNameWithoutContact = (words = []) =>
+  words.filter((word) => !isValidEmailOrPhone(word).isValid).join(" ").trim();
+
 const formatChatHistoryForOdoo = (historyArray = []) => {
-  if (!historyArray.length) return "لا يوجد سجل رسائل متاح.";
-  return historyArray
-    .map(msg => `[${msg.role === "user" ? "العميل" : "Justefy AI"}]: ${msg.text}`)
+  const cleanHistory = sanitizeHistory(historyArray);
+  if (!cleanHistory.length) return "لا يوجد سجل رسائل متاح.";
+  return cleanHistory
+    .map((message) => `[${message.role === "user" ? "العميل" : "Justefy AI"}]: ${message.content}`)
     .join("\n-------------------------\n");
 };
 
-const detectService = (msg = "") => {
-  const text = msg.toLowerCase();
+const detectService = (normalizedText = "") => {
+  const isFreeContext = normalizedText.includes("مجاني") || normalizedText.includes("ببلاش");
   const services = [
-    { keywords: ["seo", "سيو", "تحسين محركات"], name: "SEO" },
-    { keywords: ["google", "ads", "جوجل", "ادز"], name: "Google Ads" },
-    { keywords: ["سوشيال", "meta", "انستغرام", "تيكتوك", "سوشل"], name: "Social Media Ads" },
-    { keywords: ["موقع", "ويب", "website", "برمجة"], name: "Website Development" },
-    { keywords: ["بريد", "ايميل", "email", "حملات"], name: "Email Marketing" },
+    { pattern: /(seo|سيو|محركات|أرشفة|ارشفة)/i, name: "SEO", skipIfFree: true },
+    { pattern: /(google|ads|جوجل|ادز|إعلانات.*جوجل)/i, name: "Google Ads", skipIfFree: false },
+    { pattern: /(سوشيال|سوشل|فيسبوك|انستغرام|تيكتوك|ميتا|meta|facebook|tiktok)/i, name: "Social Media Ads", skipIfFree: false },
+    { pattern: /(موقع|ويب|صفحة.*هبوط|برمجة|متجر|website|landing)/i, name: "Website Development", skipIfFree: false },
+    { pattern: /(بريد|إيميل|ايميل|حملات.*بريدية|email)/i, name: "Email Marketing", skipIfFree: false },
   ];
-  return services.find(s => s.keywords.some(k => text.includes(k))) || null;
+  return services.find((service) => !(service.skipIfFree && isFreeContext) && service.pattern.test(normalizedText)) || null;
 };
 
-const isFriendlyGreeting = (msg = "") => {
-  const text = msg.toLowerCase().trim();
-  const greetings = ["مرحبا", "هلا", "اهلين", "كيفك", "كيف حالك", "اخبارك", "منور", "السلام عليكم", "سلام", "انت منيح", "شلونك", "يا هلا", "مساء الخير", "صباح الخير"];
-  return greetings.some(g => text.includes(g));
+const isFriendlyGreeting = (normalizedText = "") => {
+  const greetings = ["مرحبا", "هلا", "اهلين", "كيفك", "كيف حالك", "اخبارك", "السلام عليكم", "سلام", "مساء الخير", "صباح الخير"];
+  return greetings.some((greeting) => normalizedText.includes(greeting));
 };
 
-const detectIntent = (msg = "") => {
-  const text = msg.toLowerCase().trim();
-  if (["تهبل", "اتهبل", "بمزح", "طخ", "العاب", "نكتة"].some(w => text.includes(w))) return false;
-  
-  const purchaseAction = ["مهتم", "ابدأ", "اشترك", "تواصل", "احجز", "اطلب", "اشتري", "معني"].some(w => text.includes(w));
-  const wantsSomething = ["بدي", "اريد", "حاب", "حابب"].some(w => text.includes(w));
-  const businessContext = ["سيو", "seo", "اعلان", "موقع", "ويب", "خدمة", "باقة", "سعر", "اسعار", "تكلفة", "تسويق"].some(w => text.includes(w));
-
-  return purchaseAction || (wantsSomething && businessContext);
+const evaluateSafetyStrictRules = (normalizedText = "") => {
+  const unsafePatterns = /(متخلف|حيوان|عرص|كلب|حمار|غبي)/i;
+  return unsafePatterns.test(normalizedText) ? AI_EVAL.KICK : null;
 };
 
-const getSession = async (id) => await redis.getSession(id);
+// ─────────────────────────────────────────────────────────────────
+// Intent classification and explicit buying intent helper
+// ─────────────────────────────────────────────────────────────────
+const classifyIntent = (text = "") => {
+  // Use regex with /i directly; avoid redundant toLowerCase + /i
+  const hot = /(احجز|سجلني|اشتراك|اشتري|ابدأ الآن|اريد البدء|أريد البدء|نفذ|اتفقنا|موافق على البدء|اريد الاشتراك|اريد التسجيل)/i;
+  const warm = /(سعر|كم التكلفة|الباقات|الخدمات|تفاصيل|شو بتقدموا|شو عندكم|أسعار|تكلفة|عرض)/i;
+  const info = /(شو |عندي|لدي|أمتلك|هل تستطيع|بتقدر|هل|ماذا|لماذا|ما هي|شو خدماتكم|تفاصيل|ما هو|كيف|ليش|شرح|ما معنى|ايش|وضح|فهمني|ممكن تشرح)/i;
 
-const saveSession = async (id, session) => {
-  if (session && session.stats) {
-    session.stats.lastActivity = Date.now();
-  }
-  return redis.setSession(id, session);
+  if (hot.test(text)) return "HOT";
+  if (warm.test(text)) return "WARM";
+  return "INFO";
+};
+
+// Explicit buying intent used for funnel trigger (kept separate for clarity)
+const hasExplicitBuyingIntent = (text = "") => {
+  const explicitPatterns = /(احجز|سجلني|اشتراك|اشتري|ابدأ الآن|اريد البدء|أريد البدء|نفذ|اتفقنا|موافق على البدء|اريد الاشتراك|اريد التسجيل|حجز موعد|احجز لي)/i;
+  return explicitPatterns.test(text);
+};
+
+// ─────────────────────────────────────────────────────────────────
+// Score update helper (single source of truth for score changes)
+// ─────────────────────────────────────────────────────────────────
+const updateLeadScore = (session, intent) => {
+  const updatedSession = clone(session);
+  const delta = intent === "HOT" ? 4 : intent === "WARM" ? 1 : 0;
+  updatedSession.lead.score = Math.min(Number(updatedSession.lead.score || 0) + delta, 10);
+  return updatedSession;
+};
+
+// ─────────────────────────────────────────────────────────────────
+// Should start funnel decision encapsulated
+// ─────────────────────────────────────────────────────────────────
+
+
+const validateAndParseAiOutput = (rawResult) => {
+  const fallback = {
+    aiResponse: "أنا هنا لمساعدتك في خدمات Justefy التسويقية، هل يمكنك توضيح استفسارك؟",
+    evaluation: AI_EVAL.NORMAL,
+    tokensUsed: 0,
+  };
+  if (!rawResult || typeof rawResult !== "object") return fallback;
+  const allowedEvaluations = Object.values(AI_EVAL);
+  return {
+    aiResponse: String(rawResult.aiResponse || fallback.aiResponse).trim(),
+    evaluation: allowedEvaluations.includes(rawResult.evaluation) ? rawResult.evaluation : AI_EVAL.NORMAL,
+    tokensUsed: Number(rawResult.tokensUsed || 0),
+  };
 };
 
 const buildProductsContext = async () => {
   try {
-    const res = await getProductsCached();
-    if (!res?.ok || !res?.data?.length) return "";
-    return res.data.map(p => `- ${p.name}: ${p.list_price} ₪`).join("\n");
-  } catch { return ""; }
+    const response = await getProductsCached();
+    if (!response?.ok || !Array.isArray(response.data) || response.data.length === 0) return "";
+    return response.data
+      .slice(0, 5)
+      .map((product) => `- ${product.name}: ${product.list_price} ₪`)
+      .join("\n");
+  } catch (error) {
+    console.warn("[ChatController] Failed to build products context:", error.message || error);
+    return "";
+  }
 };
 
-const closeChat = async (userId, session, reason = "auto_close") => {
-  session.status = "closed";
-  session.step = null; 
-  session.closedAt = Date.now();
-  const fullConversationLog = formatChatHistoryForOdoo(session.history);
+const closeChat = async (userId, session, reason = "auto_close", lastAiMessage = "") => {
+  let updatedSession = clone(session);
+  updatedSession.status = "closed";
+  updatedSession.step = null;
+  updatedSession.closedAt = Date.now();
 
-  try {
-    // 1️⃣ حماية إضافية وضمان تصفية تكرار الاهتمامات بشكل كامل عند الإغلاق
-    const uniqueInterests = [...new Set(session.lead.interests || [])];
-    const interestsSummary = uniqueInterests.length > 0 ? uniqueInterests.join(" + ") : "استفسار عام";
-
-    await upsertLead({
-      name: session.lead.name || "عميل شات تم إنهاء جلسته قسرياً",
-      email: session.lead.email || `no-email-${userId}@justefy.com`, 
-      phone: session.lead.phone || "",
-      service: interestsSummary,
-      notes: `🤖 [تقرير محادثة Justefy AI التلقائي]:\n\nسبب الإغلاق: ${reason}\n\nسجل الحوار بالتفصيل:\n\n${fullConversationLog}`,
-      source: `chatbot_${reason}`, 
-    });
-    console.log(`✅ [Odoo] تم حفظ العميل ${userId} بنجاح. الـ Source: chatbot_${reason}`);
-  } catch (odooError) {
-    console.error("❌ فشل إرسال البيانات لأودو:", odooError);
+  if (lastAiMessage) {
+    updatedSession = appendMessageToSession(updatedSession, "assistant", lastAiMessage);
   }
 
-  await saveSession(userId, session);
+  updatedSession = await persistSessionAtomically(userId, updatedSession);
+
+  try {
+    const interests = [...new Set(updatedSession.lead.interests || [])];
+    const interestsSummary = interests.length ? interests.join(" + ") : "استفسار عام";
+    const fullConversationLog = formatChatHistoryForOdoo(updatedSession.history);
+
+    await upsertLead({
+      name: updatedSession.lead.name || "عميل شات",
+      email: updatedSession.lead.email || "",
+      phone: updatedSession.lead.phone || "",
+      service: interestsSummary,
+      notes: `تقرير محادثة Justefy AI:\n\nسبب الإغلاق: ${reason}\n\nسجل الحوار:\n\n${fullConversationLog}`,
+      source: `chatbot_${reason}`,
+      leadScore: updatedSession.lead.score,
+    });
+  } catch (error) {
+    console.error("[ChatController] Odoo sync failed:", error.message || error);
+  }
 
   return {
     status: "closed",
     action: "hard_close",
-    closedAt: session.closedAt,
-    aiResponse: reason === "misbehave" 
-      ? "عذراً، تم حظر استخدام الشات نهائياً لخروجك عن سياق الاستخدام المسموح لخدماتنا."
-      : "شكراً لك. تم تزويدنا بوسيلة الاتصال بنجاح، ونقل ملف استفسارك لطاقم المبيعات والتسويق في Justefy، وسنتواصل معك حياً ومباشرة فوراً! نهارك سعيد. 🚀",
+    closedAt: updatedSession.closedAt,
+    aiResponse: lastAiMessage || "شكراً لك، سنتواصل معك فوراً.",
   };
 };
 
-const handleChat = async (req, res) => {
-  try {
-    const { userId, message } = req.body;
-    if (!userId || !message) {
-      return res.status(400).json({ status: "error", aiResponse: "بيانات غير مكتملة" });
-    }
+// ─────────────────────────────────────────────────────────────────
+// STATE HANDLERS
+// ─────────────────────────────────────────────────────────────────
+const stateHandlers = {
+  [STATES.INTENT_CONFIRM]: async (normalizedText, session) => {
+    const updatedSession = clone(session);
+    const confirmedIntent = ["جاهز", "نعم", "فعلي", "شراء", "اه", "ايوه", "يس", "صحيح"].some((word) =>
+      normalizedText.includes(word)
+    );
+    const justExploring = ["استفسار", "بسأل", "بشوف", "لا", "فقط"].some((word) => normalizedText.includes(word));
 
-    let session = await getSession(userId);
-    const text = message.trim();
-
-    // فحص تنظيف الجلسة المنتهية من Redis
-    if (
-      session?.status === "closed" &&
-      session?.closedAt &&
-      Date.now() - session.closedAt > ONE_HOUR
-    ) {
-      await redis.deleteSession(userId);
-      session = null;
-      console.log(`♻️ [Redis] تم حذف جلسة المستخدم ${userId} لمرور أكثر من ساعة.`);
-    }
-
-    if (!session) {
-      session = {
-        step: null, status: "open", 
-        lead: { interests: [] }, 
-        behaviorWarnings: 0, salesSignals: 0,
-        history: [{ role: "ai", text: "مرحباً، كيف يمكننا مساعدتك اليوم؟" }],
-        stats: { messagesCount: 0, totalTokens: 0, startedAt: Date.now(), lastActivity: Date.now() }
+    if (confirmedIntent) {
+      updatedSession.step = STATES.LEAD_NAME;
+      return {
+        updatedSession,
+        nextStep: STATES.LEAD_NAME,
+        aiResponse: "على بركة الله! ما اسمك الكريم حتى نسجل الطلب بشكل رسمي؟",
       };
     }
 
-    if (session.status === "closed") {
-      return res.json({ 
-        status: "closed", 
-        action: "hard_close", 
-        closedAt: session.closedAt, 
-        aiResponse: "تم إيصال طلبكم لخدمة العملاء بنجاح، وسيتم التواصل معكم في أقرب وقت." 
+    if (justExploring) {
+      updatedSession.step = null;
+      updatedSession.lead.score = Math.max(1, updatedSession.lead.score);
+      return {
+        updatedSession,
+        nextStep: null,
+        aiResponse: "تمام، خذ راحتك بالاستفسار. ما الذي تريد معرفته عن خدماتنا؟",
+      };
+    }
+
+    return {
+      updatedSession,
+      nextStep: STATES.INTENT_CONFIRM,
+      aiResponse: "لحتى أوجهك صح: هل أنت جاهز لطلب باقة والبدء معنا الآن، أم مجرد استفسار؟",
+    };
+  },
+
+  [STATES.LEAD_NAME]: async (_normalizedText, session, rawMessage) => {
+    const updatedSession = clone(session);
+    const name = String(rawMessage || "").trim();
+
+    if (name.length < 2 || isValidEmailOrPhone(name).isValid) {
+      return {
+        updatedSession,
+        nextStep: STATES.LEAD_NAME,
+        aiResponse: "يرجى كتابة اسمك الكريم أولاً، ثم سأطلب منك وسيلة التواصل.",
+      };
+    }
+
+    updatedSession.lead.name = name;
+    updatedSession.step = STATES.LEAD_CONTACT;
+    return {
+      updatedSession,
+      nextStep: STATES.LEAD_CONTACT,
+      aiResponse: "ممتاز! ممكن رقم هاتفك أو إيميلك للتواصل ومتابعة طلبك؟",
+    };
+  },
+
+  [STATES.LEAD_CONTACT]: async (_normalizedText, session, rawMessage) => {
+    const updatedSession = clone(session);
+    const contact = extractFirstContact(rawMessage);
+
+    if (!contact.isValid) {
+      return {
+        updatedSession,
+        nextStep: STATES.LEAD_CONTACT,
+        aiResponse: "وسيلة الاتصال غير واضحة. اكتب إيميلاً أو رقم هاتف صالحاً، مثال: name@gmail.com أو 0599xxxxxx.",
+      };
+    }
+
+    if (contact.type === "email") updatedSession.lead.email = contact.matchedValue.toLowerCase();
+    else updatedSession.lead.phone = contact.matchedValue;
+
+    if (updatedSession.lead.name && (updatedSession.lead.email || updatedSession.lead.phone)) {
+      return {
+        updatedSession,
+        nextStep: TERMINAL_STEPS.CLOSE_FORM_COMPLETED,
+        aiResponse: "شكراً لك! تم استلام بيانات التواصل، وسيتصل بك فريق Justefy خلال أقل من ساعة. 🎉",
+      };
+    }
+
+    updatedSession.step = STATES.FORCE_COLLECT;
+    return {
+      updatedSession,
+      nextStep: STATES.FORCE_COLLECT,
+      aiResponse: "البيانات غير مكتملة. يرجى كتابة الاسم ورقم الهاتف أو الإيميل بوضوح.",
+    };
+  },
+
+  [STATES.FORCE_COLLECT]: async (_normalizedText, session, rawMessage) => {
+    const updatedSession = clone(session);
+    const contact = extractFirstContact(rawMessage);
+
+    if (!contact.isValid) {
+      return {
+        updatedSession,
+        nextStep: STATES.FORCE_COLLECT,
+        aiResponse: "نود خدمتك ومتابعة طلبك. يرجى إدخال إيميل صالح أو رقم هاتف للتواصل.",
+      };
+    }
+
+    if (contact.type === "email") updatedSession.lead.email = contact.matchedValue.toLowerCase();
+    else updatedSession.lead.phone = contact.matchedValue;
+
+    updatedSession.lead.name = extractNameWithoutContact(contact.words) || updatedSession.lead.name || "عميل محتمل";
+
+    return {
+      updatedSession,
+      nextStep: TERMINAL_STEPS.CLOSE_TOKEN_EXHAUSTED,
+      aiResponse: "شكراً لك. تم استلام وسيلة الاتصال وسنتواصل معك قريباً.",
+    };
+  },
+
+  [STATES.COLLECT_BEFORE_CLOSE]: async (_normalizedText, session, rawMessage) => {
+    const updatedSession = clone(session);
+    const contact = extractFirstContact(rawMessage);
+
+    if (!contact.isValid) {
+      return {
+        updatedSession,
+        nextStep: STATES.COLLECT_BEFORE_CLOSE,
+        aiResponse: "لا يمكننا مراجعة الطلب يدوياً بدون وسيلة اتصال صحيحة. يرجى كتابة رقم هاتف أو إيميل صالح.",
+      };
+    }
+
+    if (contact.type === "email") updatedSession.lead.email = contact.matchedValue.toLowerCase();
+    else updatedSession.lead.phone = contact.matchedValue;
+
+    updatedSession.lead.name = extractNameWithoutContact(contact.words) || updatedSession.lead.name || "عميل موثق";
+
+    return {
+      updatedSession,
+      nextStep: TERMINAL_STEPS.CLOSE_MISBEHAVE,
+      aiResponse: "عذراً، تم إنهاء الدردشة الآلية لخروجها عن سياق الاستخدام المسموح.",
+    };
+  },
+};
+
+const handleTerminalStep = async (userId, session, nextStep, aiResponse) => {
+  if (nextStep === TERMINAL_STEPS.CLOSE_FORM_COMPLETED) {
+    return closeChat(userId, session, "form_completed", aiResponse);
+  }
+  if (nextStep === TERMINAL_STEPS.CLOSE_TOKEN_EXHAUSTED) {
+    return closeChat(userId, session, "token_exhausted_force_collect", aiResponse);
+  }
+  if (nextStep === TERMINAL_STEPS.CLOSE_MISBEHAVE) {
+    return closeChat(userId, session, "misbehave", aiResponse);
+  }
+  return null;
+};
+
+// ─────────────────────────────────────────────────────────────────
+// MAIN HANDLER
+// ─────────────────────────────────────────────────────────────────
+
+
+const handleChat = async (req, res) => {
+
+  try {
+    const { userId, message, messageId = null } = req.body || {};
+    const cleanMessage = String(message || "").trim();
+
+    if (!userId || !cleanMessage) {
+      return res.status(400).json({ status: "error", aiResponse: "بيانات غير مكتملة" });
+    }
+
+    const rawSession = await redis.getSession(userId);
+    let currentSession = normalizeSession(rawSession);
+
+    // Inactivity reset
+    const now = Date.now();
+    const lastActivity = currentSession.stats?.lastActivity || 0;
+    const isInactiveExpired =
+      currentSession.status !== "closed" &&
+      lastActivity &&
+      now - lastActivity > INACTIVITY_RESET_MS;
+
+    if (isInactiveExpired) {
+      await redis.deleteSession(userId);
+      currentSession = normalizeSession(null);
+      return res.json({
+        status: "new_session",
+        reset: true,
+        aiResponse: "مرحباً 👋 كيف يمكننا مساعدتك اليوم في خدمات Justefy؟",
       });
     }
 
-    // 🛡️ Resource Check
-    const isResourceExhausted = session.stats.totalTokens >= MAX_TOKENS || session.stats.messagesCount >= MAX_MESSAGES;
-    if (isResourceExhausted && session.step !== "force_collect" && session.step !== "collect_before_close") {
-      if (session.lead.name && (session.lead.email || session.lead.phone)) {
-        const closed = await closeChat(userId, session, "max_resources_reached");
-        return res.json(closed);
-      }
-      session.step = "force_collect";
-      const emergencyResponse = "⚠️ **تنويه:** لقد استهلكت الجلسة الحالية الحد الأقصى من الدعم الآلي المتوفر.\n\nمن فضلك، **اكتب لنا الآن (اسمك الكريم + إيميلك أو رقم هاتفك)** ليقوم مستشار المبيعات بالتواصل المباشر معك فوراً! 👇";
-      session.history.push({ role: "ai", text: emergencyResponse });
-      await saveSession(userId, session);
-      return res.json({ status: "ok", action: "keep_open_force_collect", aiResponse: emergencyResponse });
+    const normalizedText = normalizeText(cleanMessage);
+
+    // Duplicate message guard
+    if (messageId && currentSession._committedMessageId === messageId) {
+      return res.json({ status: "ok", duplicate: true, aiResponse: "تم استلام رسالتك مسبقاً." });
     }
 
-    // 🚨 Force Collect Flow
-    if (session.step === "force_collect") {
-      const words = text.split(/\s+/);
-      let contactObj = null;
-      for (const w of words) {
-        const check = isValidEmailOrPhone(w);
-        if (check.isValid) { contactObj = check; break; }
-      }
-      
-      if (!contactObj) {
-        return res.json({ 
-          status: "ok", 
-          action: "keep_open_force_collect", 
-          aiResponse: "❌ يرجى إدخال بريد إلكتروني صالح أو رقم هاتف (مثال: name@gmail.com أو 0599xxxxxx) لنتمكن من حفظ طلبك 👇" 
-        });
-      }
-
-      if (contactObj.type === "email") session.lead.email = contactObj.matchedValue.toLowerCase();
-      else session.lead.phone = contactObj.matchedValue;
-      
-      const namePart = words.filter(w => !isValidEmailOrPhone(w).isValid).join(" ");
-      session.lead.name = namePart.trim() || "عميل محتمل جاد";
-      
-      const finalClosedResult = await closeChat(userId, session, "token_exhausted_force_collect");
-      return res.json(finalClosedResult);
+    // Expired closed session cleanup
+    if (currentSession.status === "closed" && currentSession.closedAt && Date.now() - currentSession.closedAt > ONE_HOUR_MS) {
+      await redis.deleteSession(userId);
+      currentSession = normalizeSession(null);
     }
 
-    // 🔥 Collect Before Close Flow
-    if (session.step === "collect_before_close") {
-      const words = text.split(/\s+/);
-      let contactObj = null;
-      for (const w of words) {
-        const check = isValidEmailOrPhone(w);
-        if (check.isValid) { contactObj = check; break; }
-      }
-      
-      if (!contactObj) {
-        return res.json({ 
-          status: "ok", 
-          action: "keep_open_force_collect", 
-          aiResponse: "🛑 لا يمكن مراجعة طلبك بدون وسيلة تواصل صالحة. الرجاء كتابة (اسمك + إيميلك أو رقم هاتفك) بشكل صحيح هلقيت 👇" 
-        });
-      }
-
-      if (contactObj.type === "email") session.lead.email = contactObj.matchedValue.toLowerCase();
-      else session.lead.phone = contactObj.matchedValue;
-
-      const namePart = words.filter(w => !isValidEmailOrPhone(w).isValid).join(" ");
-      session.lead.name = namePart.trim() || "عميل مشاغب موثق";
-      
-      const finalClosedResult = await closeChat(userId, session, "misbehave");
-      return res.json(finalClosedResult);
+    // Still closed
+    if (currentSession.status === "closed") {
+      return res.json({ status: "closed", action: "hard_close", closedAt: currentSession.closedAt, aiResponse: "تم إيصال طلبكم لخدمة العملاء بنجاح." });
     }
 
-    // 🎯 Name Flow
-    if (session.step === "name") {
-      session.lead.name = text;
-      session.step = "email";
-      const aiResponse = "ممتاز 👌 ممكن الإيميل أو رقم الهاتف للتواصل ومتابعة طلبك؟";
-      session.history.push({ role: "user", text }, { role: "ai", text: aiResponse });
-      session.stats.messagesCount += 1;
-      await saveSession(userId, session);
-      return res.json({ status: "ok", aiResponse });
-    }
+    currentSession = applyScoreDecay(currentSession);
 
-    // 🎯 Email/Phone Flow
-    if (session.step === "email") {
-      const words = text.split(/\s+/);
-      let contactObj = null;
-      for (const w of words) {
-        const check = isValidEmailOrPhone(w);
-        if (check.isValid) { contactObj = check; break; }
-      }
-
-      if (!contactObj) {
-        const aiResponse = "وسيلة الاتصال غير صحيحة ❌ اكتب إيميل أو رقم هاتف صالح، مثال: name@gmail.com أو 0599xxxxxx";
-        session.history.push({ role: "user", text }, { role: "ai", text: aiResponse });
-        session.stats.messagesCount += 1;
-        await saveSession(userId, session);
-        return res.json({ status: "ok", aiResponse });
-      }
-
-      if (contactObj.type === "email") session.lead.email = contactObj.matchedValue.toLowerCase();
-      else session.lead.phone = contactObj.matchedValue;
-
-      session.history.push({ role: "user", text });
-      session.stats.messagesCount += 1;
-      const closedResult = await closeChat(userId, session, "form_completed");
-      return res.json(closedResult);
-    }
-
-    // 🛡️ [LAYER 1]: HARD GUARD - منع الـ AI تماماً من استلام التحيات الصريحة
-    if (isFriendlyGreeting(text)) {
-      const helloResponse = "أهلاً وسهلاً بك في Justefy! 👋 نورتنا يا غالي. كيف بقدر أساعدك اليوم في تطوير باقات الـ SEO، أو إدارة إعلانات جوجل والسوشيال ميديا لمشروعك؟";
-      
-      session.history.push({ role: "user", text }, { role: "ai", text: helloResponse });
-      session.stats.messagesCount += 1;
-      await saveSession(userId, session);
-      return res.json({ status: "ok", aiResponse: helloResponse });
-    }
-
-    // 🔎 [LAYER 2]: BUSINESS INTENT DETECTION 
-    if (detectIntent(text) && session.step === null) {
-      session.step = "name";
-      session.lead.notes = text;
-      const aiResponse = "ممتاز 🚀 خلينا نبدأ بالاسم الكريم لتسجيل طلبك وعمل اللازم 👇";
-      session.history.push({ role: "user", text }, { role: "ai", text: aiResponse });
-      session.stats.messagesCount += 1;
-      await saveSession(userId, session);
-      return res.json({ status: "ok", aiResponse });
-    }
-
-    // 1️⃣ رصد الخدمات وتخزينها الفوري بدون تكرار باستخدام الـ Set الـ Inline
-    const service = detectService(text);
-    if (service) {
-      session.lead.interests = [...new Set([...session.lead.interests, service.name])];
-    }
-
-    // 3️⃣ الفرز الدقيق لمنع الـ Overlap لحالات الأسئلة التعليمية المدمجة مع نية حقيقية للشراء
-    const salesKeywords = ["سعر", "اسعار", "تكلفة", "كم", "باقة", "اشتراك", "خدمة", "إعلان", "اعلان", "موقع", "سيو", "seo", "عملاء", "بكم", "تكلفتها", "تفاصيل"];
-    const educationalKeywords = ["شو يعني", "ايش هو", "ما هو", "معنى", "تعريف", "كيف بيشتغل", "شرح"];
-    
-    const hasSalesSignal = salesKeywords.some(k => text.toLowerCase().includes(k));
-    const isStrictlyEducational = educationalKeywords.some(k => text.toLowerCase().includes(k)) && 
-                                  !["سعر", "تكلفة", "بكم", "كم", "باقة"].some(k => text.toLowerCase().includes(k));
-
-    const validSignal = hasSalesSignal && !isStrictlyEducational;
-
-    if (validSignal) {
-      session.salesSignals = (session.salesSignals || 0) + 1;
-    }
-
-    session.history.push({ role: "user", text });
-    session.stats.messagesCount += 1;
-
-    // فحص تحويل العميل الجاد
-    const shouldTriggerLeadForm = 
-      (session.salesSignals >= 2) || 
-      (service && session.stats.messagesCount >= 3 && session.salesSignals >= 1);
-
-    if (shouldTriggerLeadForm && !session.lead.name && session.step === null) {
-      session.step = "name";
-      const aiResponse = "يسعدني جداً اهتمامك بخدمات التسويق الرقمي والمواقع في Justefy ومستعد أعطيك كافة التفاصيل والأسعار 👌 لكن قبل ما نكمل، شو اسمك الكريم عشان أسجله عندي؟";
-      session.history.push({ role: "ai", text: aiResponse });
-      await saveSession(userId, session);
-      return res.json({ status: "ok", aiResponse: aiResponse });
-    }
-
-    // 🥉 [LAYER 3]: AI GATEWAY
-    const recentHistory = session.history.slice(-12);
-    const products = await buildProductsContext();
-    const aiResult = await getAIResponse({
-      history: recentHistory,
-      userMessage: text, 
-      odooData: products,
-    });
-
-    // 4️⃣ تحويل صريح وآمن لحماية العداد الفوري للتوكنز من الـ undefined أو الـ string
-    session.stats.totalTokens += Number(aiResult.tokensUsed || 0);
-
-    // 2️⃣ إضافة حالة الـ neutral الصريحة في طبقة القرار لمنع الـ Implicit Bias
-    const isUnsafeAI = aiResult.evaluation === "unsafe" || aiResult.evaluation === "kick";
-    const isOutOfScope = aiResult.evaluation === "out_of_scope";
-
-    if (isUnsafeAI) {
-      if (session.lead.name && (session.lead.email || session.lead.phone)) {
-        const closed = await closeChat(userId, session, "misbehave");
-        return res.json(closed);
-      }
-      session.step = "collect_before_close";
-      const lockResponse = "🛑 عذراً، يبدو أن المحادثة خرجت عن سياق العمل والمساعدة المسموحة لشركة Justefy.\n\nقبل قفل الجلسة، **يرجى تزويدنا باسمك وإيميلك أو رقم هاتفك** لمراجعة طلبك يدوياً. 👇";
-      session.history.push({ role: "ai", text: lockResponse });
-      await saveSession(userId, session);
+    // Safety check (strict bypass)
+    const strictSafetyBreach = evaluateSafetyStrictRules(normalizedText);
+    if (strictSafetyBreach === AI_EVAL.KICK) {
+      const lockResponse = "عذراً، تم رصد تجاوز لسياق المساعدة المسموحة. يرجى تزويدنا باسمك ورقم هاتفك لمراجعة الطلب يدوياً.";
+      currentSession.step = STATES.COLLECT_BEFORE_CLOSE;
+      currentSession = appendMessageToSession(currentSession, "user", cleanMessage, messageId);
+      currentSession = appendMessageToSession(currentSession, "assistant", lockResponse);
+      await persistSessionAtomically(userId, currentSession, messageId);
       return res.json({ status: "ok", action: "keep_open_force_collect", aiResponse: lockResponse });
     }
 
-    if (isOutOfScope) {
-      session.behaviorWarnings = (session.behaviorWarnings || 0) + 1;
+    // Append user message to history
+    currentSession = appendMessageToSession(currentSession, "user", cleanMessage, messageId);
 
-      if (session.behaviorWarnings === 1) {
-        const warnMsg = "أنا مساعد لشركة Justefy المتخصص بخدمات التسويق الرقمي والمواقع. هل تحتاج مساعدة في باقاتنا؟";
-        session.history.push({ role: "ai", text: warnMsg });
-        await saveSession(userId, session);
-        return res.json({ status: "ok", aiResponse: warnMsg });
-      } 
-      
-      if (session.behaviorWarnings === 2) {
-        const warnMsg = "⚠️ تحذير: أنا مخصص فقط لخدمات Justefy (إعلانات، SEO، مواقع). الرجاء الالتزام بذلك وإلا سيتم إنهاء المحادثة.";
-        session.history.push({ role: "ai", text: warnMsg });
-        await saveSession(userId, session);
-        return res.json({ status: "ok", aiResponse: warnMsg });
-      }
+    // classify intent
+    const intent = classifyIntent(normalizedText);
 
-      if (session.behaviorWarnings >= 3) {
-        if (session.lead.name && (session.lead.email || session.lead.phone)) {
-          const closed = await closeChat(userId, session, "misbehave");
-          return res.json(closed);
-        }
-        session.step = "collect_before_close";
-        const lockResponse = "🛑 نظراً لتكرار تجاوز سياق العمل المسموح، سيتم إنهاء الدردشة الآلية.\n\nالرجاء كتابة **اسمك + رقم هاتفك أو إيميلك** الحين لمتابعة استفسارك مع الإدارة يدوياً. 👇";
-        session.history.push({ role: "ai", text: lockResponse });
-        await saveSession(userId, session);
-        return res.json({ status: "ok", action: "keep_open_force_collect", aiResponse: lockResponse });
-      }
+    // update score once
+    currentSession = updateLeadScore(currentSession, intent);
+
+    // Funnel trigger decision (single place)
+   const isHotIntent =
+  hasExplicitBuyingIntent(normalizedText) ||
+  intent === "HOT";
+
+const startFunnel =
+  isHotIntent &&
+  currentSession.lead.score >= 3
+  currentSession.step === null &&
+  !(currentSession.lead.name && (currentSession.lead.email || currentSession.lead.phone));
+    if (startFunnel) {
+      currentSession.step = STATES.INTENT_CONFIRM;
+      const funnelResponse = "واضح أنك مهتم بالبدء 👍 هل أنت جاهز لطلب الخدمة الآن أم ما زلت تستكشف الخيارات؟";
+      currentSession = appendMessageToSession(currentSession, "assistant", funnelResponse);
+      await persistSessionAtomically(userId, currentSession, messageId);
+      return res.json({ status: "ok", aiResponse: funnelResponse });
     }
 
-    // 🛡️ Token Check
-    if (session.stats.totalTokens >= MAX_TOKENS && !session.step) {
-      if (!session.lead.name || (!session.lead.email && !session.lead.phone)) {
-        session.step = "force_collect";
-        const emergencyResponse = "⚠️ لقد وصلت للحد الأقصى من الاستشارات المجانية المتاحة عبر الجلسة. الرجاء كتابة اسمك وإيميلك أو رقم هاتفك للتواصل معك فوراً يدوياً.";
-        session.history.push({ role: "ai", text: emergencyResponse });
-        await saveSession(userId, session);
-        return res.json({ status: "ok", action: "keep_open_force_collect", aiResponse: emergencyResponse });
-      } else {
-        const closed = await closeChat(userId, session, "max_resources_reached");
-        return res.json(closed);
-      }
+    // Active state machine
+    if (currentSession.step && stateHandlers[currentSession.step]) {
+      const handlerResult = await stateHandlers[currentSession.step](normalizedText, currentSession, cleanMessage);
+      currentSession = handlerResult.updatedSession;
+
+      const terminalResponse = await handleTerminalStep(userId, currentSession, handlerResult.nextStep, handlerResult.aiResponse);
+      if (terminalResponse) return res.json(terminalResponse);
+
+      currentSession = appendMessageToSession(currentSession, "assistant", handlerResult.aiResponse);
+      await persistSessionAtomically(userId, currentSession, messageId);
+      return res.json({ status: "ok", aiResponse: handlerResult.aiResponse });
     }
 
-    // المسار الطبيعي (Safe / Neutral)
-    const finalAiResponse = aiResult.aiResponse || "أعتذر، هل يمكنك إعادة صياغة سؤالك؟ 🙏";
-    session.history.push({ role: "ai", text: finalAiResponse });
-    await saveSession(userId, session);
+    // Greeting
+    if (isFriendlyGreeting(normalizedText)) {
+      const helloResponse = "أهلاً وسهلاً بك في Justefy! 👋 كيف أقدر أساعدك اليوم؟ نعمل في SEO، إعلانات جوجل، سوشيال ميديا، وتطوير المواقع.";
+      currentSession = appendMessageToSession(currentSession, "assistant", helloResponse);
+      await persistSessionAtomically(userId, currentSession, messageId);
+      return res.json({ status: "ok", aiResponse: helloResponse });
+    }
 
-    return res.json({ status: "ok", aiResponse: finalAiResponse });
+    // Service detection
+    const service = detectService(normalizedText);
+    if (service) {
+      currentSession.lead.interests = [...new Set([...currentSession.lead.interests, service.name])];
+    }
 
+    // Lead completeness check
+    const isLeadComplete = Boolean(
+      currentSession.lead.name &&
+      (currentSession.lead.email || currentSession.lead.phone) &&
+      currentSession.lead.score >= 2
+    );
+
+    // Resource exhaustion
+    const isResourceExhausted =
+      currentSession.stats.totalTokens >= MAX_TOKENS ||
+      currentSession.stats.userMessagesCount >= MAX_USER_MESSAGES;
+
+    if (isResourceExhausted) {
+      if (isLeadComplete) {
+        return res.json(
+          await closeChat(userId, currentSession, "max_resources_reached", "تم حفظ استفسارك بنجاح، وسيتواصل معك فريق Justefy قريباً.")
+        );
+      }
+      currentSession.step = STATES.FORCE_COLLECT;
+      const emergencyResponse = "شارفت جلسة الدعم الآلي على الانتهاء. اترك اسمك ورقم هاتفك أو إيميلك وسنتواصل معك.";
+      currentSession = appendMessageToSession(currentSession, "assistant", emergencyResponse);
+      await persistSessionAtomically(userId, currentSession, messageId);
+      return res.json({ status: "ok", action: "keep_open_force_collect", aiResponse: emergencyResponse });
+    }
+
+    // Default AI response path (could call getAIResponse if needed)
+    // For INFO intents we can use a lightweight template; for WARM/HOT we can call AI for richer reply
+   let aiResponse;
+
+// 1) HOT → funnel أو AI قوي
+if (intent === "HOT") {
+  aiResponse = "أرى اهتمام واضح 👍";
+}
+// 2) WARM → AI عادي (أفضل تجربة)
+else if (intent === "WARM") {
+  const ai = await getAIResponse({
+    history: sanitizeHistory(currentSession.history).slice(-10),
+    userMessage: cleanMessage,
+  });
+
+  aiResponse = ai.aiResponse;
+}
+
+// 3) INFO → AI خفيف أو fallback
+else {
+  const ai = await getAIResponse({
+    history: sanitizeHistory(currentSession.history).slice(-6),
+    userMessage: cleanMessage,
+  });
+
+  aiResponse = ai.aiResponse;
+}
+
+    currentSession = appendMessageToSession(currentSession, "assistant", aiResponse);
+    await persistSessionAtomically(userId, currentSession, messageId);
+    return res.json({ status: "ok", aiResponse });
   } catch (error) {
-    console.error("Chat Error:", error);
-    return res.status(500).json({ status: "error", aiResponse: "تعذر الرد حالياً، حاول لاحقاً." });
+    console.error("[ChatController] handleChat error:", error.message || error);
+    return res.status(500).json({ status: "error", aiResponse: "حدث خطأ داخلي، يرجى المحاولة لاحقاً." });
   }
 };
 
-const getChatStatus = async (req, res) => {
-  try {
-    const { userId } = req.query; 
-    if (!userId) {
-      return res.status(400).json({ status: "error", message: "المعرّف مطلوب" });
-    }
-
-    const session = await getSession(userId);
-    if (!session) {
-      return res.json({ status: "open", message: "جلسة جديدة بالكامل" });
-    }
-
-    if (
-      session.status === "closed" && 
-      session.closedAt && 
-      (Date.now() - session.closedAt > ONE_HOUR)
-    ) {
-      await redis.deleteSession(userId); 
-      return res.json({ 
-        status: "expired", 
-        message: "انتهت صلاحية الجلسة المغلقة وتم تصفيرها من قاعدة البيانات"
-      });
-    }
-
-    return res.json({
-      status: session.status || "open",
-      closedAt: session.closedAt || null
-    });
-  } catch (error) {
-    console.error("Status Sync Error:", error);
-    return res.status(500).json({ status: "error", message: "خطأ داخلي في الخادم" });
-  }
-};
-
-module.exports = { 
+module.exports = {
   handleChat,
-  getChatStatus 
+  // Exported for testing if needed
+  classifyIntent,
+  hasExplicitBuyingIntent,
+  updateLeadScore,
 };

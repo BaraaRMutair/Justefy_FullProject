@@ -1,113 +1,235 @@
-const getAIResponse = async ({ history = [], userMessage, odooData }, retries = 2) => {
-  try {
-  const systemInstruction = `
-أنت نظام ذكي رسمي تابع لشركة Justefy الرقمية، مهمتك هي:
-1) تقييم رسالة المستخدم
-2) إنتاج رد مبيعات مختصر جداً فقط إذا كان مناسب
-3) الالتزام الصارم بالـ JSON فقط بدون أي نص إضافي
+/**
+ * aiService.improved.js (CLEAN VERSION)
+ * ─────────────────────────────────────────
+ * - إزالة التكرار
+ * - تحسين evaluation safety
+ * - تبسيط parsing
+ * - hard guard أقوى
+ * - نظام واضح ومستقر
+ */
 
-🚨 مهم جداً:
-- ممنوع كتابة أي شيء خارج JSON
-- ممنوع إضافة شرح أو Markdown أو نصوص
-- الرد يجب أن يكون JSON صالح 100%
+const AI_EVAL = Object.freeze({
+  NORMAL: "normal",
+  OUT_OF_SCOPE: "out_of_scope",
+  KICK: "kick",
+});
 
-📌 تصنيف الرسالة (evaluation):
+const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+const DEFAULT_MODEL =
+  process.env.OPENROUTER_MODEL || "anthropic/claude-3-haiku";
+const REQUEST_TIMEOUT_MS = Number(process.env.AI_TIMEOUT_MS || 20000);
 
-- "kick" → فقط إذا كانت الرسالة تحتوي شتائم صريحة، إهانات، أو ألفاظ غير محترمة أو إساءة مباشرة
+const safeContent = (v) => (typeof v === "string" ? v.trim() : "");
 
-- "out_of_scope" → فقط إذا كانت الرسالة بعيدة جداً عن أي سياق يمكن ربطه بالخدمات (مثل: نقاشات سياسية، دينية، فلسفية طويلة، أو محتوى عشوائي لا يمكن تحويله لاهتمام تجاري)
+// ─────────────────────────────
+// HARD SAFETY LAYER
+// ─────────────────────────────
+const forceNormalizeEval = (evalValue, text = "") => {
+  const t = String(text || "").toLowerCase();
 
-- "normal" → يشمل:
-  ✔ التحيات (مرحبا، كيف حالك، صباح الخير)
-  ✔ الأسئلة البسيطة أو العامة
-  ✔ أي استفسار يمكن تحويله لاحقاً لخدمة أو نقاش
+  const hardKickPattern =
+    /(غبي|حيوان|كلب|عرص|حمار|fuck|shit|idiot|bitch)/i;
 
-📌 طريقة الرد (JSON فقط):
+  if (hardKickPattern.test(t)) return AI_EVAL.KICK;
 
-{
-  "evaluation": "normal" | "out_of_scope" | "kick",
-  "aiResponse": "رد مختصر جداً (سطرين كحد أقصى) باللغة العربية"
-}
+  if (evalValue === AI_EVAL.KICK) return AI_EVAL.KICK;
+  if (evalValue === AI_EVAL.OUT_OF_SCOPE) return AI_EVAL.OUT_OF_SCOPE;
 
-📌 قواعد aiResponse:
-- إذا evaluation = "kick" → رد حازم ومهذب جداً بدون نقاش
-- إذا evaluation = "out_of_scope" → رد ترحيبي مع توجيه لطيف لخدمات Justefy
-- إذا evaluation = "normal" → ركّز على تقديم خدمات Justefy + محاولة تحويل العميل (اسم / إيميل / واتساب)
+  return AI_EVAL.NORMAL;
+};
 
-📌 مهم جداً:
-- لا تخترع أي أسعار أو معلومات غير موجودة في CONTEXT
-- استخدم فقط بيانات Odoo إن كانت موجودة
+const normalizeHistoryRole = (role) =>
+  role === "ai" || role === "assistant" ? "assistant" : "user";
 
-📌 أسلوب الرد:
-- قصير جداً
-- احترافي وتسويقي
-- هدفه تحويل العميل (conversion) وليس النقاش الطويل
+// ─────────────────────────────
+// SYSTEM PROMPT (stable + strict)
+// ─────────────────────────────
 
-📌 CONTEXT FROM ODOO:
-${odooData || "لا توجد خدمات متاحة حالياً"}
+const buildSystemInstruction = (odooData) => `
+أنت مساعد ذكي لشركة Justefy.
+
+🎯 دورك الأساسي:
+- شرح خدمات Justefy بشكل واضح وبسيط
+- الإجابة على الأسئلة فقط
+- مساعدة العميل على فهم الخدمة
+
+🚫 ممنوعات صارمة:
+- ممنوع طلب اسم أو هاتف أو إيميل بشكل مباشر
+- ممنوع الإصرار على الشراء أو الإلحاح
+- ممنوع استخدام أسلوب ضغط أو استعجال
+- ممنوع بدء أي "تجميع بيانات" من نفسك
+
+⚠️ مهم جداً (قاعدة التكامل مع النظام):
+- عملية جمع البيانات (الاسم / الهاتف / الإيميل) تتم فقط عبر النظام (ChatController Funnel)
+- إذا لم يكن هناك طلب مباشر من النظام في السياق، لا تطلب أي بيانات نهائياً
+- إذا لاحظت نية شراء، قم فقط بالشرح والتوضيح وانتظر النظام ليبدأ الفانل
+
+🧠 أسلوب الرد:
+- عربي بسيط وواضح
+- 2 إلى 4 أسطر فقط
+- بدون مبالغة تسويقية
+- بدون وعود قوية أو ضغط
+
+📌 عند الأسئلة:
+- INFO → شرح فقط
+- WARM → شرح + تفاصيل بسيطة
+- HOT → تحفيز هادئ بدون طلب بيانات
+
+💡 أسلوب HOT الصحيح:
+"ممتاز، هذه الخدمة مناسبة لك، إذا حابب أكمل معك التفاصيل الفريق رح يساعدك مباشرة"
+
+❌ وليس:
+"ما اسمك؟ رقمك؟"
+
+📦 بيانات الشركة (للاستخدام في الشرح فقط):
+${safeContent(odooData) || "لا يوجد بيانات"}
+
+🎯 الهدف النهائي:
+تجربة محادثة طبيعية + دعم نظام الـ funnel بدون أي تضارب أو تجاوزات
 `;
 
-    // ✂️ تضييق الـ History المرسل للذكاء الاصطناعي لحفظ التوكنز (آخر 12 رسالة فقط)
-    const trimmedHistory = history.slice(-12);
+ console.log("NEW AI PROMPT LOADED");
 
-    const messages = [
-      { role: "system", content: systemInstruction },
-      ...trimmedHistory.map(m => ({ 
-        role: m.role === "ai" || m.role === "assistant" ? "assistant" : "user", 
-        content: m.text || m.content || "" 
-      })),
-    ];
+// ─────────────────────────────
+// JSON EXTRACTION
+// ─────────────────────────────
+const extractJsonObject = (content) => {
+  const cleaned = safeContent(content)
+    .replace(/```json/gi, "")
+    .replace(/```/g, "")
+    .trim();
 
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+  if (!cleaned) return null;
+
+  try {
+    return JSON.parse(cleaned);
+  } catch (_) {
+    const start = cleaned.indexOf("{");
+    const end = cleaned.lastIndexOf("}");
+    if (start !== -1 && end !== -1) {
+      try {
+        return JSON.parse(cleaned.slice(start, end + 1));
+      } catch (_) {
+        return null;
+      }
+    }
+    return null;
+  }
+};
+
+// ─────────────────────────────
+// NORMALIZE AI RESULT
+// ─────────────────────────────
+const normalizeAiResult = (parsed, raw = "") => {
+  const evaluation = forceNormalizeEval(parsed?.evaluation, raw);
+
+  const aiResponse =
+    safeContent(parsed?.aiResponse) ||
+    "مرحباً 👋 كيف يمكنني مساعدتك في خدمات Justefy؟";
+
+  return {
+    evaluation,
+    aiResponse,
+  };
+};
+
+// ─────────────────────────────
+// OPENROUTER CALL
+// ─────────────────────────────
+const callOpenRouter = async (messages) => {
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(),
+    REQUEST_TIMEOUT_MS
+  );
+
+  try {
+    const res = await fetch(OPENROUTER_URL, {
       method: "POST",
+      signal: controller.signal,
       headers: {
-        "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
         "Content-Type": "application/json",
-        "X-Title": "Justefy AI Framework"
       },
       body: JSON.stringify({
-        model: "anthropic/claude-3-haiku",
+        model: DEFAULT_MODEL,
         messages,
-        temperature: 0.0,
-        response_format: { type: "json_object" }
-      })
+        temperature: 0,
+        response_format: { type: "json_object" },
+      }),
     });
 
-    const data = await response.json();
-    let rawContent = data?.choices?.[0]?.message?.content || "{}";
-    
-    // تنظيف الكود لو رجع محاطاً بـ أقواس البرمجة نكاية بـ JSON mode
-    rawContent = rawContent.replace(/```json/g, "").replace(/```/g, "").trim();
-    
-    // 🛡️ صمام الأمان الذي اقترحته لحماية السيرفر من الانهيار عند التحليل
-    let result;
-    try {
-      result = JSON.parse(rawContent);
-    } catch (parseError) {
-      console.warn("⚠️ فشل الـ JSON Object mode من OpenRouter، تم تفعيل خطة الطوارئ النصية.");
-      result = {
-        evaluation: "normal",
-        aiResponse: rawContent // نعتبر النص كاملاً هو الرد كخيار آمن
-      };
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      throw new Error(
+        `OpenRouter error: ${res.status} ${JSON.stringify(data)}`
+      );
     }
 
+    return data;
+  } finally {
+    clearTimeout(timeout);
+  }
+};
+
+// ─────────────────────────────
+// MAIN FUNCTION
+// ─────────────────────────────
+const getAIResponse = async (
+  { history = [], userMessage = "", odooData = "" },
+  retries = 2
+) => {
+  try {
+    const messages = [
+      {
+        role: "system",
+        content: buildSystemInstruction(odooData),
+      },
+
+      ...history.slice(-10).map((m) => ({
+        role: normalizeHistoryRole(m.role),
+        content: safeContent(m.content || m.text),
+      })),
+
+      {
+        role: "user",
+        content: safeContent(userMessage),
+      },
+    ];
+
+    const data = await callOpenRouter(messages);
+
+    const raw =
+      data?.choices?.[0]?.message?.content || "";
+
+    const parsed = extractJsonObject(raw);
+
+    const normalized = normalizeAiResult(parsed, raw);
+
     return {
-      evaluation: result.evaluation || "normal",
-      aiResponse: result.aiResponse || "مرحباً بك، كيف يمكنني مساعدتك اليوم في خدمات Justefy؟",
-      tokensUsed: data?.usage?.total_tokens || 0
+      ...normalized,
+      tokensUsed: Number(data?.usage?.total_tokens || 0),
     };
+  } catch (err) {
+    console.error("[AI SERVICE ERROR]", err);
 
-  } catch (error) {
-    console.error("❌ خطأ في الـ AI Service:", error);
     if (retries > 0) {
-      return getAIResponse({ history, userMessage, odooData }, retries - 1);
+      return getAIResponse(
+        { history, userMessage, odooData },
+        retries - 1
+      );
     }
+
     return {
-      evaluation: "normal",
-      aiResponse: "نواجه ضغطاً في الخدمة حالياً، يرجى المحاولة بعد قليل.",
-      tokensUsed: 0
+      evaluation: AI_EVAL.NORMAL,
+      aiResponse: "نواجه ضغط حالياً، حاول لاحقاً.",
+      tokensUsed: 0,
     };
   }
 };
 
-module.exports = { getAIResponse };
+module.exports = {
+  getAIResponse,
+  AI_EVAL,
+};

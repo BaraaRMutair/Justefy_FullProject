@@ -38,7 +38,7 @@ export default function ChatBot() {
     if (closedTime) {
       const timePast = Date.now() - new Date(closedTime).getTime();
       
-      if (timePast > 3600000) { 
+      if (timePast > 900000) { 
         localStorage.removeItem("chat_messages");
         localStorage.removeItem("chat_closed_at");
         localStorage.removeItem("chat_user_id");
@@ -102,6 +102,22 @@ export default function ChatBot() {
 
       const data = await res.json();
 
+/* ✅ 1. RESET من السيرفر (الجديد) */
+if (data.reset || data.status === "new_session") {
+  setMessages([
+    {
+      id: "welcome",
+      role: "assistant",
+      content: data.aiResponse || "مرحباً، كيف يمكننا مساعدتك اليوم؟",
+      timestamp: new Date(),
+    },
+  ]);
+
+  localStorage.removeItem("chat_messages");
+  setIsClosed(false);
+  setIsLoading(false);
+  return;
+}
       if (data.status === "closed") {
         const botMsg: Message = {
           id: crypto.randomUUID(),
