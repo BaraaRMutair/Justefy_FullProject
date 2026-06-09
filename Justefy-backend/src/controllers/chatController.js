@@ -71,6 +71,9 @@ const normalizeSession = (rawSession) => {
   return session;
 };
 
+
+
+
 const sanitizeHistory = (historyArray = []) => {
   if (!Array.isArray(historyArray)) return [];
   return historyArray
@@ -243,15 +246,23 @@ const validateAndParseAiOutput = (rawResult) => {
 
 const buildProductsContext = async () => {
   try {
-    const response = await getProductsCached();
-    if (!response?.ok || !Array.isArray(response.data) || response.data.length === 0) return "";
-    return response.data
-      .slice(0, 5)
-      .map((product) => `- ${product.name}: ${product.list_price} ₪`)
+    const res = await getProductsCached();
+    console.log("📦 PRODUCTS RAW:", JSON.stringify(res, null, 2));
+
+    if (!res?.ok || !Array.isArray(res.data)) {
+            console.log("❌ NO PRODUCTS FOUND");
+
+      return "لا يوجد منتجات حالياً.";
+    }
+
+    return res.data
+      .slice(0, 10)
+      .map(p => `- ${p.name}: ${p.list_price} ₪`)
       .join("\n");
-  } catch (error) {
-    console.warn("[ChatController] Failed to build products context:", error.message || error);
-    return "";
+
+  } catch (err) {
+    console.error("[PRODUCT CONTEXT ERROR]", err);
+    return "لا يوجد منتجات حالياً.";
   }
 };
 
@@ -463,6 +474,14 @@ const handleChat = async (req, res) => {
     const rawSession = await redis.getSession(userId);
     let currentSession = normalizeSession(rawSession);
 
+    const ONE_DAY = 24 * 60 * 60 * 1000;
+
+if (
+  currentSession.lastAbuseAt &&
+  Date.now() - currentSession.lastAbuseAt > ONE_DAY
+) {
+  currentSession.behaviorWarnings = 0;
+}
     // Inactivity reset
     const now = Date.now();
     const lastActivity = currentSession.stats?.lastActivity || 0;
@@ -502,15 +521,62 @@ const handleChat = async (req, res) => {
     currentSession = applyScoreDecay(currentSession);
 
     // Safety check (strict bypass)
-    const strictSafetyBreach = evaluateSafetyStrictRules(normalizedText);
-    if (strictSafetyBreach === AI_EVAL.KICK) {
-      const lockResponse = "عذراً، تم رصد تجاوز لسياق المساعدة المسموحة. يرجى تزويدنا باسمك ورقم هاتفك لمراجعة الطلب يدوياً.";
-      currentSession.step = STATES.COLLECT_BEFORE_CLOSE;
-      currentSession = appendMessageToSession(currentSession, "user", cleanMessage, messageId);
-      currentSession = appendMessageToSession(currentSession, "assistant", lockResponse);
-      await persistSessionAtomically(userId, currentSession, messageId);
-      return res.json({ status: "ok", action: "keep_open_force_collect", aiResponse: lockResponse });
-    }
+    
+// ─────────────────────────────
+// ABUSE ESCALATION SYSTEM
+// ─────────────────────────────
+const strictSafetyBreach = evaluateSafetyStrictRules(normalizedText);
+
+if (strictSafetyBreach === AI_EVAL.KICK) {
+
+  currentSession.behaviorWarnings =
+    Number(currentSession.behaviorWarnings || 0) + 1;
+
+  // 🔴 المرة الثالثة → إغلاق
+  if (currentSession.behaviorWarnings >= 3) {
+
+    currentSession.lastAbuseAt = Date.now();
+    const closeMsg =
+      "تم إنهاء المحادثة بسبب تكرار استخدام أسلوب غير مناسب. يمكنك التواصل معنا لاحقاً بشكل طبيعي.";
+
+    currentSession.status = "closed";
+    currentSession.closedAt = Date.now();
+
+    currentSession = appendMessageToSession(
+      currentSession,
+      "assistant",
+      closeMsg
+    );
+
+    await persistSessionAtomically(userId, currentSession, messageId);
+
+    return res.json({
+      status: "closed",
+      action: "abuse_close",
+      aiResponse: closeMsg
+    });
+  }
+
+  // 🟡 أول مرتين → رد محترم بدون funnel
+  const warnMsg =
+    currentSession.behaviorWarnings === 1
+      ? "خلينا نحافظ على أسلوب محترم 😊 كيف أقدر أساعدك في خدماتنا؟"
+      : "يرجى استخدام أسلوب مناسب حتى أتمكن من مساعدتك بشكل أفضل.";
+
+  currentSession = appendMessageToSession(
+    currentSession,
+    "assistant",
+    warnMsg
+  );
+
+  await persistSessionAtomically(userId, currentSession, messageId);
+
+  return res.json({
+    status: "ok",
+    action: "abuse_warning",
+    aiResponse: warnMsg
+  });
+}
 
     // Append user message to history
     currentSession = appendMessageToSession(currentSession, "user", cleanMessage, messageId);
@@ -599,28 +665,42 @@ const startFunnel =
 
 // 1) HOT → funnel أو AI قوي
 if (intent === "HOT") {
-  aiResponse = "أرى اهتمام واضح 👍";
+const productsContext = await buildProductsContext();
+console.log("🔥 PRODUCTS CONTEXT:");
+
+const ai = await getAIResponse({
+  history: currentSession.history,
+  userMessage: cleanMessage,
+  odooData: productsContext||"SEO, Google Ads, Website Development,Email Marketing",
+});
+
+  aiResponse = ai?.aiResponse || "أرى اهتمام واضح 👍";
 }
 
 
 // 2) WARM → AI عادي (أفضل تجربة)
 
 else if (intent === "WARM") {
-  const ai = await getAIResponse({
-    history: sanitizeHistory(currentSession.history).slice(-10),
-    userMessage: cleanMessage,
-    odooData
-  });
+const productsContext = await buildProductsContext();
+
+const ai = await getAIResponse({
+  history: currentSession.history,
+  userMessage: cleanMessage,
+  odooData: productsContext||"SEO, Google Ads, Website Development,Email Marketing",
+});
 
   aiResponse = ai?.aiResponse || "لا أستطيع الرد حالياً، حاول لاحقاً.";
 }
 
 // 3) INFO → AI خفيف أو fallback
 else {
-  const ai = await getAIResponse({
-    history: sanitizeHistory(currentSession.history).slice(-6),
-    userMessage: cleanMessage,
-  });
+const productsContext = await buildProductsContext();
+
+const ai = await getAIResponse({
+  history: currentSession.history,
+  userMessage: cleanMessage,
+  odooData: productsContext||"SEO, Google Ads, Website Development,Email Marketing",
+});
 
   aiResponse = ai?.aiResponse || "مرحباً 👋 كيف أقدر أساعدك؟";
 

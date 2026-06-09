@@ -92,7 +92,24 @@ const isLocked = async (email) => {
   if (!email) return false;
   return Boolean(await redis.get(lockKey(email)));
 };
+const PRODUCTS_CACHE_KEY = "products_cache";
 
+const getProductsCache = async () => {
+  const data = await redis.get(PRODUCTS_CACHE_KEY);
+  return safeJsonParse(data, null);
+};
+
+const setProductsCache = async (
+  products,
+  ttl = PRODUCTS_CACHE_TTL_SECONDS
+) => {
+  return redis.set(
+    PRODUCTS_CACHE_KEY,
+    JSON.stringify(products),
+    "EX",
+    ttl
+  );
+};
 module.exports = {
   getSession,
   setSession,
@@ -100,4 +117,6 @@ module.exports = {
   setClosedSession,
   saveSessionLocked,
   isLocked,
+  getProductsCache,
+  setProductsCache,
 };

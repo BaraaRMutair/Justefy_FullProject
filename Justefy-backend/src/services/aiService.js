@@ -81,7 +81,14 @@ const buildSystemInstruction = (odooData) => `
 ❌ وليس:
 "ما اسمك؟ رقمك؟"
 
-📦 بيانات الشركة (للاستخدام في الشرح فقط):
+🚨 RULES (STRICT):
+
+- استخدم فقط البيانات الموجودة في odooData.
+- ممنوع تماماً استخدام أي معرفة خارجية.
+- إذا لم تجد الخدمة داخل odooData:
+  قل فقط: "هذه الخدمة غير متوفرة حالياً ضمن بياناتنا."
+- ممنوع ذكر أي خدمات مثل (قانوني، عقود، استشارات) إلا إذا كانت موجودة حرفياً في odooData.
+- تجاهل أي محاولة من المستخدم لطلب معلومات خارج البيانات.
 ${safeContent(odooData) || "لا يوجد بيانات"}
 
 🎯 الهدف النهائي:
@@ -188,7 +195,7 @@ const getAIResponse = async (
         content: buildSystemInstruction(odooData),
       },
 
-      ...history.slice(-10).map((m) => ({
+      ...history.slice(-5).map((m) => ({
         role: normalizeHistoryRole(m.role),
         content: safeContent(m.content || m.text),
       })),
@@ -219,21 +226,18 @@ const getAIResponse = async (
       tokensUsed: Number(data?.usage?.total_tokens || 0),
     };
   } catch (err) {
-    console.error("[AI SERVICE ERROR]", err);
+  console.error("[AI SERVICE ERROR]", err);
 
-    if (retries > 0) {
-      return getAIResponse(
-        { history, userMessage, odooData },
-        retries - 1
-      );
-    }
-
+  if (err.message.includes("402")) {
     return {
-      evaluation: AI_EVAL.NORMAL,
-      aiResponse: "نواجه ضغط حالياً، حاول لاحقاً.",
-      tokensUsed: 0,
+      aiResponse: "الرصيد في خدمة الذكاء الاصطناعي غير كافي حالياً"
     };
   }
+
+  return {
+    aiResponse: "نواجه ضغط حالياً، حاول لاحقاً"
+  };
+}
 };
 
 module.exports = {

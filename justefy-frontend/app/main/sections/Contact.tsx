@@ -70,7 +70,16 @@ export default function Contact() {
         }
       );
 
-      if (!response.ok) throw new Error("Failed To Submit Lead");
+     if (!response.ok) {
+  const errorBody = await response.text();
+
+  console.error("STATUS:", response.status);
+  console.error("BODY:", errorBody);
+
+  throw new Error(
+    `Failed To Submit Lead (${response.status})`
+  );
+}
 
       const result = await response.json();
 
