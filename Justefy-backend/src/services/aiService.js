@@ -135,7 +135,7 @@ const normalizeAiResult = (parsed, raw = "") => {
  const aiResponse =
   parsed?.aiResponse?.trim?.() ||
   raw?.trim?.() ||
-  "مرحباً 👋 كيف يمكنني مساعدتك في خدمات Justefy؟";
+  "ما قدرت أفهم الرد حالياً، حاول تعيد صياغة سؤالك";
 
   return {
     evaluation,
@@ -193,6 +193,9 @@ const callGemini = async (messages) => {
         role: m.role === "assistant" ? "model" : "user",
         parts: [{ text: m.content }],
       })),
+       generationConfig: {
+    temperature: 0.7
+  }
     }),
   });
 
@@ -237,18 +240,17 @@ const getAIResponse = async (
     ];
 
     //const data = await callOpenRouter(messages);
-    const data = await callGemini(messages);
+  const data = await callGemini(messages);
 
-    const raw =
-      data?.choices?.[0]?.message?.content || "";
+const raw = data?.aiResponse || "";
 
-   const parsed = (() => {
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-})();
+//    const parsed = (() => {
+//   try {
+//     return JSON.parse(raw);
+//   } catch {
+//     return null;
+//   }
+// })();
 
     const normalized = normalizeAiResult(parsed, raw);
 

@@ -85,6 +85,8 @@ const createLead = async (payload) => {
 };
 
 const updateLead = async (id, payload) => {
+   console.log("UPDATE ID =", id);
+  console.log("UPDATE PAYLOAD =", payload);
   return await execute("crm.lead", "write", [[id], payload]);
 };
 
@@ -135,7 +137,7 @@ const getCustomers = async () => {
 const getSubscriptions = async () => {
   try {
     const data = await execute(
-      "sale.order",
+      "sale.subscription",
       "search_read",
       [[["state", "!=", "cancel"]]],
       {

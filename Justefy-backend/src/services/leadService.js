@@ -33,8 +33,20 @@ const buildLeadCacheKeys = ({ email, phone }) => {
 const getCachedLeadId = async ({ email, phone }) => {
   for (const key of buildLeadCacheKeys({ email, phone })) {
     const cached = await redis.getLeadCache(key);
-    if (cached?.leadId) return cached.leadId;
+
+    if (!cached) continue;
+
+    // الحالة الجديدة
+    if (typeof cached.leadId === "number") {
+      return cached.leadId;
+    }
+
+    // لو الكاش مخزن كنص
+    if (!isNaN(Number(cached.leadId))) {
+      return Number(cached.leadId);
+    }
   }
+
   return null;
 };
 
@@ -44,7 +56,7 @@ const setLeadCaches = async ({ email, phone, leadId }) => {
   const keys = buildLeadCacheKeys({ email, phone });
 
   await Promise.all(
-    keys.map((key) => redis.setLeadCache(key, { leadId }))
+    keys.map((key) => redis.setLeadCache(key, leadId))
   );
 };
 
@@ -158,11 +170,16 @@ const upsertLead = async (params = {}) => {
   // =========================
   // 3. PAYLOAD SAFE
   // =========================
-  const payload = {
-    name: existing ? existing.name : `${name} - ${service}`,
-    contact_name: name,
-    description: `${existing?.description || ""}${newNotes}`,
-  };
+const payload = {
+  name: `${name || "Lead"} - ${service || "General"}`,
+  contact_name: name,
+  email_from: email,
+  description: `
+Source: ${source}
+Service: ${service || "NOT_SET"}
+Notes: ${notes || ""}
+    `,
+};
 
   if (email) payload.email_from = email;
 
@@ -174,7 +191,15 @@ if (phone) {
   // 4. UPDATE / CREATE
   // =========================
   if (existing?.id) {
-    await odoo.updateLead(existing.id, payload);
+    console.log("EXISTING =", existing);
+console.log("EXISTING ID =", existing?.id);
+console.log("TYPE =", typeof existing?.id);
+    const leadId =
+  typeof existing.id === "object"
+    ? existing.id.leadId
+    : existing.id;
+
+await odoo.updateLead(leadId, payload);
 
     await setLeadCaches({
       email: email || existing.email_from,
