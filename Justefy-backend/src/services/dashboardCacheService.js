@@ -5,6 +5,7 @@ const { sendEmail } = require("../config/mail");
 // =========================
 // BUILD DASHBOARD DATA
 // =========================
+
 const buildDashboardData = async () => {
   try {
     console.log("🐢 جاري جلب بيانات فريش من أودو وسحب إيميلات العملاء...");
@@ -15,10 +16,11 @@ const buildDashboardData = async () => {
       "search_read",
       [[["is_subscription", "=", true]]],
       { 
-        fields: ["name", "partner_id", "amount_total", "next_invoice_date", "state"] 
+        fields: ["id","name", "partner_id", "amount_total", "next_invoice_date", "state"] 
       }
+      
     );
-
+console.log("ODOO RESULT =", data);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 

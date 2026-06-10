@@ -193,19 +193,22 @@ const callGemini = async (messages) => {
         role: m.role === "assistant" ? "model" : "user",
         parts: [{ text: m.content }],
       })),
-       generationConfig: {
-    temperature: 0.7
-  }
+      generationConfig: {
+        temperature: 0.7
+      }
     }),
   });
 
   const data = await res.json();
 
-  const text =
-    data?.candidates?.[0]?.content?.parts?.[0]?.text ||
-    "ما قدرت أجيب رد حالياً";
+  console.log("🔥 GEMINI STATUS:", res.status);
+  console.log("🔥 GEMINI RESPONSE:", JSON.stringify(data, null, 2));
 
-  return { aiResponse: text };
+  if (!res.ok) {
+    throw new Error("Gemini API failed: " + JSON.stringify(data));
+  }
+
+  return data;
 };
 
 // ─────────────────────────────
@@ -242,22 +245,17 @@ const getAIResponse = async (
     //const data = await callOpenRouter(messages);
   const data = await callGemini(messages);
 
-const raw = data?.aiResponse || "";
+const raw =
+  data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
 
-//    const parsed = (() => {
-//   try {
-//     return JSON.parse(raw);
-//   } catch {
-//     return null;
-//   }
-// })();
+const normalized = normalizeAiResult(null, raw);
 
-    const normalized = normalizeAiResult(parsed, raw);
+return {
+  aiResponse: normalized.aiResponse,
+  evaluation: normalized.evaluation,
+  tokensUsed: Number(data?.usageMetadata?.totalTokenCount || 0),
+};
 
-    return {
-      ...normalized,
-      tokensUsed: Number(data?.usage?.total_tokens || 0),
-    };
   } catch (err) {
   console.error("[AI SERVICE ERROR]", err);
 

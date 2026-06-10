@@ -137,7 +137,7 @@ const getCustomers = async () => {
 const getSubscriptions = async () => {
   try {
     const data = await execute(
-      "sale.subscription",
+      "sale.order",
       "search_read",
       [[["state", "!=", "cancel"]]],
       {

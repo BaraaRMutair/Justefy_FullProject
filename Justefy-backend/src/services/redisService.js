@@ -124,6 +124,9 @@ const setLeadCache = async (email, leadId) => {
   );
 };
 module.exports = {
+  set,
+  get,
+  del,
   getSession,
   setSession,
   deleteSession,
