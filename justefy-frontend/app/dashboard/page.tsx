@@ -14,13 +14,12 @@ export default function DashboardPage() {
     const [data, setData] = useState<any>(null);
     const [loading, setLoading] = useState(true);
 
-    // 🌐 جلب رابط الباك إند بشكل ديناميكي (السحاب أو اللوكال)
+    // 🌐 جلب رابط الباك إند بشكل ديناميكي (السحاب أو اللوكال المعتمد على بورت 5000)
     const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
     const fetchData = async () => {
         setLoading(true);
         try {
-            // ✅ تم التعديل ليقرأ من الرابط الديناميكي
             const res = await fetch(`${API_BASE_URL}/api/dashboard`, {
                 cache: "no-store" 
             });
@@ -28,7 +27,7 @@ export default function DashboardPage() {
             if (!res.ok) throw new Error("Network response was not ok");
 
             const result = await res.json();
-            console.log("البيانات المستلمة:", result); 
+            console.log("البيانات المستلمة من السيرفر الخارجي:", result); 
 
             if (result.success) {
                 setData(result);
@@ -40,12 +39,13 @@ export default function DashboardPage() {
         }
     };
 
-    useEffect(() => { fetchData(); }, []);
+    useEffect(() => { f(); }, []);
+    const f = () => { fetchData(); }; // دالة تشغيل بسيطة متوافقة
 
     const chartData = [
-        { name: 'نشط', value: data?.stats?.totalActive || 0, color: '#f97316' },
+        { name: 'نشط', value: data?.stats?.totalActive || 0, color: 'rgb(12, 209, 75)' },
         { name: 'قريب الانتهاء', value: data?.stats?.totalExpiring || 0, color: '#fb923c' },
-        { name: 'منتهي', value: data?.stats?.totalExpired || 0, color: '#444' },
+        { name: 'منتهي', value: data?.stats?.totalExpired || 0, color: '#df1616' },
     ];
 
     if (loading) return (
@@ -53,7 +53,7 @@ export default function DashboardPage() {
             <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1 }}>
                 <RefreshCcw className="w-12 h-12 text-justefy-500" />
             </motion.div>
-            <p className="text-gray-400">جاري سحب بيانات Odoo 19...</p>
+            <p className="text-gray-400">جاري سحب بيانات Odoo 19 وتحديث المؤشرات...</p>
         </div>
     );
 
@@ -67,7 +67,7 @@ export default function DashboardPage() {
                     onClick={async () => {
                         setLoading(true);
                         try {
-                            // ✅ تم التعديل ليقرأ من الرابط الديناميكي عند التحديث
+                            // إرسال طلب التحديث للباك إند الخارجي لتشغيل فحص أودو السريع وإرسال الإيميلات
                             await fetch(`${API_BASE_URL}/api/dashboard/refresh`, {
                                 method: "POST",
                             });
@@ -88,9 +88,9 @@ export default function DashboardPage() {
 
             {/* Stats Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                <StatCard title="الاشتراكات النشطة" value={data?.stats?.totalActive} icon={<Activity />} trend="+12%" color="#f97316" />
-                <StatCard title="إجمالي الإيرادات" value={`${data?.stats?.totalRevenue?.toLocaleString()} ₪`} icon={<CreditCard />} trend="مباشر" color="#34d399" />
-                <StatCard title="قريب الانتهاء" value={data?.stats?.totalExpiring} icon={<Calendar />} trend="تنبيه" color="#fb923c" />
+                <StatCard title="الاشتراكات النشطة" value={data?.stats?.totalActive} icon={<Activity />} trend="+12%" color="#338d18" />
+                <StatCard title="إجمالي الإيرادات" value={`${data?.stats?.totalRevenue?.toLocaleString()} ₪`} icon={<CreditCard />} trend="مباشر" color="#0c4790" />
+                <StatCard title="قريب الانتهاء" value={data?.stats?.totalExpiring} icon={<Calendar />} trend="تنبيه" color="#ff9706" />
                 <StatCard title="حالة النظام" value="مستقر" icon={<TrendingUp />} trend="100%" color="#8b5cf6" />
             </div>
 
@@ -127,10 +127,14 @@ export default function DashboardPage() {
                                     </div>
                                     <div>
                                         <p className="text-sm font-bold text-white">{sub.client}</p>
-                                        <p className="text-[10px] text-gray-500 uppercase tracking-widest">{sub.expiry}</p>
+                                        <p className="text-[10px] text-gray-500 uppercase tracking-widest">ينتهي: {sub.expiry}</p>
                                     </div>
                                 </div>
-                                <div className={`w-2 h-2 rounded-full ${sub.status === 'ACTIVE' ? 'bg-green-500' : 'bg-red-500'} shadow-[0_0_8px_rgba(0,0,0,0.5)]`} />
+                                {/* ✅ تم إصلاح تلوين النقاط لتشمل البرتقالي لقريب الانتهاء والأحمر للمنتهي */}
+                                <div className={`w-2 h-2 rounded-full ${
+                                    sub.status === 'ACTIVE' ? 'bg-green-500' : 
+                                    sub.status === 'EXPIRING' ? 'bg-orange-500' : 'bg-red-500'
+                                } shadow-[0_0_8px_rgba(0,0,0,0.3)]`} />
                             </div>
                         ))}
                     </div>

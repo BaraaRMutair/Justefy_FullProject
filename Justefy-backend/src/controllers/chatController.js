@@ -190,7 +190,7 @@ const isFriendlyGreeting = (normalizedText = "") => {
 };
 
 const evaluateSafetyStrictRules = (normalizedText = "") => {
-  const unsafePatterns = /(متخلف|حيوان|عرص|كلب|حمار|غبي)/i;
+  const unsafePatterns = /(متخلف|حيوان|عرص|كلب|حمار|غبي|شبشب|تفو عليك|محقرك|حقير)/i;
   return unsafePatterns.test(normalizedText) ? AI_EVAL.KICK : null;
 };
 
@@ -199,8 +199,8 @@ const evaluateSafetyStrictRules = (normalizedText = "") => {
 // ─────────────────────────────────────────────────────────────────
 const classifyIntent = (text = "") => {
   // Use regex with /i directly; avoid redundant toLowerCase + /i
-  const hot = /(احجز|سجلني|اشتراك|اشتري|ابدأ الآن|اريد البدء|أريد البدء|نفذ|اتفقنا|موافق على البدء|اريد الاشتراك|اريد التسجيل)/i;
-  const warm = /(سعر|كم التكلفة|الباقات|الخدمات|تفاصيل|شو بتقدموا|شو عندكم|أسعار|تكلفة|عرض)/i;
+  const hot = /(احجز|سجلني|اشتراك|اشتري|ابدأ الآن|اريد البدء|أريد البدء|نفذ|اتفقنا|موافق على البدء|اريد الاشتراك|اريد التسجيل|جاهز|يلا|نعم|ممتاز|تمام|خلينا|جاهز)/i;
+  const warm = /(سعر|كم التكلفة|الباقات|الخدمات|تفاصيل|شو بتقدموا|شو عندكم|أسعار|تكلفة|عرض|مهتم)/i;
   const info = /(شو |عندي|لدي|أمتلك|هل تستطيع|بتقدر|هل|ماذا|لماذا|ما هي|شو خدماتكم|تفاصيل|ما هو|كيف|ليش|شرح|ما معنى|ايش|وضح|فهمني|ممكن تشرح)/i;
 
   if (hot.test(text)) return "HOT";
