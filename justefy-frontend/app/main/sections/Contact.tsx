@@ -120,7 +120,14 @@ export default function Contact() {
             تواصل معنا
           </span>
 <h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold leading-normal tracking-wide font-display text-justefy-900 mb-4 sm:mb-6">
-    لنبدأ <span className="gradient-text">رحلة النجاح</span> معنا
+    لنبدأ{" "}
+    <span 
+        className="text-transparent bg-clip-text bg-gradient-to-l from-justefy-500 to-justefy-700 inline-block"
+        style={{ paddingBottom: '0.2em', marginBottom: '-0.2em' }}
+    >
+        رحلة النجاح
+    </span>
+    {" "}معنا
 </h2>
           <p className="text-sm sm:text-base lg:text-lg text-justefy-500 max-w-2xl mx-auto px-2">
             املأ النموذج أدناه وسيقوم فريقنا بالتواصل معك خلال 24 ساعة.

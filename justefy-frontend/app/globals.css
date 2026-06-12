@@ -141,7 +141,16 @@
             background-color: var(--color-justefy-400);
         }
 }
-
+@layer utilities {
+    /* كلاس مخصص للنصوص المتدرجة مع معالجة قص الحروف */
+    .text-gradient-safe {
+        @apply text-transparent bg-clip-text bg-gradient-to-l from-justefy-500 to-justefy-700 inline-block;
+        padding-bottom: 0.2em;
+        margin-bottom: -0.2em;
+        /* هذا السطر يضمن عدم قص أي تشكيل أو حرف نازل */
+        line-height: 1.2;
+    }
+}
 @layer components {
     /* Glassmorphism Card */
     .glass-card {

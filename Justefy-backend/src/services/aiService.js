@@ -182,35 +182,31 @@ const normalizeAiResult = (parsed, raw = "") => {
 //     clearTimeout(timeout);
 //   }
 // };
-const callGemini = async (messages) => {
-  const res = await fetch(`${GEMINI_URL}?key=${process.env.GEMINI_API_KEY}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      contents: messages.map(m => ({
-        role: m.role === "assistant" ? "model" : "user",
-        parts: [{ text: m.content }],
-      })),
-      generationConfig: {
-        temperature: 0.7
-      }
-    }),
-  });
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-  const data = await res.json();
+const callGemini = async (messages, retries = 3) => {
+  for (let i = 0; i < retries; i++) {
+    const res = await fetch(`${GEMINI_URL}?key=${process.env.GEMINI_API_KEY}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: messages.map(m => ({
+          role: m.role === "assistant" ? "model" : "user",
+          parts: [{ text: m.content }],
+        })),
+        generationConfig: { temperature: 0.7 }
+      }),
+    });
 
-  console.log("🔥 GEMINI STATUS:", res.status);
-  console.log("🔥 GEMINI RESPONSE:", JSON.stringify(data, null, 2));
+    const data = await res.json();
 
-  if (!res.ok) {
-    throw new Error("Gemini API failed: " + JSON.stringify(data));
+    if (res.status !== 503) return data;
+
+    await sleep(800 * (i + 1)); // backoff
   }
 
-  return data;
+  throw new Error("Gemini overloaded");
 };
-
 // ─────────────────────────────
 // MAIN FUNCTION
 // ─────────────────────────────

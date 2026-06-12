@@ -30,13 +30,15 @@ export default function Hero() {
                     {/* Heading & Text */}
                     <div className="space-y-4 sm:space-y-5 flex flex-col items-center max-w-3xl mx-auto">
                         {/* ✅ font-bold + leading-normal + tracking-wide */}
-                        <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-bold leading-normal tracking-wide text-justefy-900 px-1 sm:px-2 text-balance">
-                            نساعدك على تحقيق{" "}
-                            <span className="bg-gradient-to-l from-justefy-500 to-justefy-700 bg-clip-text text-transparent">
-                                نمو حقيقي
-                            </span>
-                        </h1>
-                        
+<h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-bold leading-normal tracking-wide text-justefy-900 px-1 sm:px-2 text-balance">
+    نساعدك على تحقيق{" "}
+    <span 
+        className="text-transparent bg-clip-text bg-gradient-to-l from-justefy-500 to-justefy-700 pb-2 -mb-2 inline-block"
+        style={{ paddingBottom: '0.2em', marginBottom: '-0.2em' }}
+    >
+        نمو حقيقي
+    </span>
+</h1>          
                         <p className="max-w-2xl text-sm sm:text-base md:text-lg lg:text-xl leading-relaxed text-justefy-600 px-2 sm:px-4 text-balance">
                             في <strong>Justefy</strong> نقدم حلول تسويق رقمي تساعدك على زيادة العملاء، 
                             تحسين الظهور، وتحقيق نتائج قابلة للقياس عبر الحملات الإعلانية وإدارة المحتوى والتحليلات.

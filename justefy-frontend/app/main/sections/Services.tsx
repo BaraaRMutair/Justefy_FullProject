@@ -102,7 +102,13 @@ export default function Services() {
           </span>
         
 <h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold leading-normal tracking-wide text-justefy-900 mb-4 sm:mb-6">
-    نُدير كل شيء <span className="gradient-text">في مكان واحد</span>
+    نُدير كل شيء{" "}
+    <span 
+        className="text-transparent bg-clip-text bg-gradient-to-l from-justefy-500 to-justefy-700 pb-2 -mb-2 inline-block"
+        style={{ paddingBottom: '0.2em', marginBottom: '-0.2em' }}
+    >
+        في مكان واحد
+    </span>
 </h2>
           <p className="text-base sm:text-lg text-justefy-500 max-w-2xl mx-auto px-2">
             من الإعلانات المدفوعة إلى التحسين العضوي، نقدم حلولًا متكاملة 

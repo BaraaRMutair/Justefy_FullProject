@@ -46,7 +46,13 @@ export default function Testimonials() {
             آراء عملائنا
           </span>
 <h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold leading-normal tracking-wide font-display text-justefy-900 mb-4 sm:mb-6">
-    ثقة تُبنى <span className="gradient-text">بنتائج حقيقية</span>
+    ثقة تُبنى{" "}
+    <span 
+        className="text-transparent bg-clip-text bg-gradient-to-l from-justefy-500 to-justefy-700 inline-block"
+        style={{ paddingBottom: '0.2em', marginBottom: '-0.2em' }}
+    >
+        بنتائج حقيقية
+    </span>
 </h2>
         </motion.div>
 

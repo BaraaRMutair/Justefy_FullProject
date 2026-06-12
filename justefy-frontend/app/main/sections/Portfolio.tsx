@@ -55,7 +55,13 @@ export default function Portfolio() {
             نماذج من أعمالنا
           </span>
 <h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold leading-normal tracking-wide font-display text-justefy-900 mb-3 sm:mb-4">
-    مشاريع نفخر <span className="gradient-text">بتنفيذها</span>
+    مشاريع نفخر{" "}
+    <span 
+        className="text-transparent bg-clip-text bg-gradient-to-l from-justefy-500 to-justefy-700 pb-2 -mb-2 inline-block"
+        style={{ paddingBottom: '0.2em', marginBottom: '-0.2em' }}
+    >
+        بتنفيذها
+    </span>
 </h2>
           <p className="max-w-2xl mx-auto text-justefy-500 text-sm sm:text-base lg:text-lg leading-relaxed px-2">
             مجموعة من المشاريع التي عملنا عليها في مجالات التسويق الرقمي وتطوير المواقع وبناء الهويات البصرية.
