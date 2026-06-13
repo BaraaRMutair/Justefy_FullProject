@@ -1,16 +1,3 @@
-/**
- * ChatController.improved.js
- * ─────────────────────────────────────────────────────────────────
- * تحسينات رئيسية:
- *  - إصلاح تكرار منطق funnel trigger
- *  - إزالة حساب score المزدوج والاحتفاظ بتحديث واحد فقط
- *  - إعادة تعريف hasExplicitBuyingIntent واستخدامها في قرار بدء الفانل
- *  - إعادة ترتيب التنفيذ: classifyIntent -> update score -> funnel decision -> state machine / AI
- *  - تبسيط استخدام regex (إزالة الازدواجية في toLowerCase + /i)
- *  - تنظيف نهاية السلسلة المقطوعة وتصحيح الردود النهائية
- * ─────────────────────────────────────────────────────────────────
- */
-
 const { getAIResponse, AI_EVAL } = require("../services/aiService");
 const { upsertLead } = require("../services/leadService");
 const redis = require("../services/redisService");
@@ -23,9 +10,7 @@ const INACTIVITY_RESET_MS = 15 * 60 * 1000;
 const DECAY_TIME_WINDOW_MS = 5 * 60 * 1000;
 const HISTORY_CAP = 40;
 
-// ─────────────────────────────────────────────────────────────────
 // STATES & TERMINALS
-// ─────────────────────────────────────────────────────────────────
 const STATES = Object.freeze({
   INTENT_CONFIRM: "intent_confirm",
   LEAD_NAME: "lead_name",
@@ -40,9 +25,7 @@ const TERMINAL_STEPS = Object.freeze({
   CLOSE_MISBEHAVE: "close_misbehave",
 });
 
-// ─────────────────────────────────────────────────────────────────
 // HELPERS
-// ─────────────────────────────────────────────────────────────────
 const clone = (value) => structuredClone(value);
 const normalizeText = (value = "") => String(value || "").toLowerCase().trim();
 
@@ -70,9 +53,6 @@ const normalizeSession = (rawSession) => {
   session.stats.lastActivity = Number(session.stats.lastActivity || Date.now());
   return session;
 };
-
-
-
 
 const sanitizeHistory = (historyArray = []) => {
   if (!Array.isArray(historyArray)) return [];
@@ -148,9 +128,8 @@ const extractFirstContact = (message = "") => {
   if (emailMatch) {
     return { isValid: true, matchedValue: emailMatch[0], type: "email", words: cleanMessage.split(/\s+/) };
   }
-const phoneMatch = cleanMessage.match(/(?:\+?\d{1,3}[\s-]?)?\d{7,14}/);
-
-if (phoneMatch) {
+  const phoneMatch = cleanMessage.match(/(?:\+?\d{1,3}[\s-]?)?\d{7,14}/);
+  if (phoneMatch) {
     const normalized = phoneMatch[0].replace(/[\s-]/g, "");
     return { isValid: true, matchedValue: normalized, type: "phone", words: cleanMessage.split(/\s+/) };
   }
@@ -194,40 +173,52 @@ const evaluateSafetyStrictRules = (normalizedText = "") => {
   return unsafePatterns.test(normalizedText) ? AI_EVAL.KICK : null;
 };
 
-// ─────────────────────────────────────────────────────────────────
-// Intent classification and explicit buying intent helper
-// ─────────────────────────────────────────────────────────────────
 const classifyIntent = (text = "") => {
-  // Use regex with /i directly; avoid redundant toLowerCase + /i
-  const hot = /(احجز|سجلني|اشتراك|اشتري|ابدأ الآن|اريد البدء|أريد البدء|نفذ|اتفقنا|موافق على البدء|اريد الاشتراك|اريد التسجيل|جاهز|يلا|نعم|ممتاز|تمام|خلينا|جاهز)/i;
-  const warm = /(سعر|كم التكلفة|الباقات|الخدمات|تفاصيل|شو بتقدموا|شو عندكم|أسعار|تكلفة|عرض|مهتم)/i;
-  const info = /(شو |عندي|لدي|أمتلك|هل تستطيع|بتقدر|هل|ماذا|لماذا|ما هي|شو خدماتكم|تفاصيل|ما هو|كيف|ليش|شرح|ما معنى|ايش|وضح|فهمني|ممكن تشرح)/i;
+  const normalized = String(text || "").toLowerCase();
 
-  if (hot.test(text)) return "HOT";
-  if (warm.test(text)) return "WARM";
+  const hotSignals = {
+    "احجز": 3, "اشتري": 3, "اشتراك": 3, "ابدأ": 2, "ابدأ الآن": 3,
+    "اريد البدء": 3, "أريد البدء": 3, "جاهز": 2, "يلا": 1, "موافق": 2, "تمام خلينا": 2
+  };
+
+  const warmSignals = {
+    "سعر": 2, "كم التكلفة": 3, "الباقات": 2, "الخدمات": 1, "عرض": 1,
+    "مهتم": 2, "شو بتقدموا": 2, "تفاصيل": 1
+  };
+
+  const infoSignals = {
+    "شو": 1, "كيف": 1, "ليش": 1, "ما هو": 1, "شرح": 1, "ماذا": 1, "فهمني": 1
+  };
+
+  const calculateScore = (signals) => {
+    let score = 0;
+    for (const [word, weight] of Object.entries(signals)) {
+      if (normalized.includes(word)) score += weight;
+    }
+    return score;
+  };
+
+  if (normalized.includes("شو يعني") || normalized.includes("ما الفرق")) {
+    return "INFO";
+  }
+
+  if (calculateScore(hotSignals) >= 3) return "HOT";
+  if (calculateScore(warmSignals) >= 2) return "WARM";
+
   return "INFO";
 };
 
-// Explicit buying intent used for funnel trigger (kept separate for clarity)
 const hasExplicitBuyingIntent = (text = "") => {
   const explicitPatterns = /(احجز|سجلني|اشتراك|اشتري|ابدأ الآن|اريد البدء|أريد البدء|نفذ|اتفقنا|موافق على البدء|اريد الاشتراك|اريد التسجيل|حجز موعد|احجز لي)/i;
   return explicitPatterns.test(text);
 };
 
-// ─────────────────────────────────────────────────────────────────
-// Score update helper (single source of truth for score changes)
-// ─────────────────────────────────────────────────────────────────
 const updateLeadScore = (session, intent) => {
   const updatedSession = clone(session);
   const delta = intent === "HOT" ? 4 : intent === "WARM" ? 1 : 0;
   updatedSession.lead.score = Math.min(Number(updatedSession.lead.score || 0) + delta, 10);
   return updatedSession;
 };
-
-// ─────────────────────────────────────────────────────────────────
-// Should start funnel decision encapsulated
-// ─────────────────────────────────────────────────────────────────
-
 
 const validateAndParseAiOutput = (rawResult) => {
   const fallback = {
@@ -247,25 +238,18 @@ const validateAndParseAiOutput = (rawResult) => {
 const buildProductsContext = async () => {
   try {
     const res = await getProductsCached();
-    console.log("📦 PRODUCTS RAW:", JSON.stringify(res, null, 2));
-
     if (!res?.ok || !Array.isArray(res.data)) {
-            console.log("❌ NO PRODUCTS FOUND");
-
       return "لا يوجد منتجات حالياً.";
     }
-
     return res.data
       .slice(0, 10)
       .map(p => `- ${p.name}: ${p.list_price} ₪`)
       .join("\n");
-
   } catch (err) {
     console.error("[PRODUCT CONTEXT ERROR]", err);
     return "لا يوجد منتجات حالياً.";
   }
 };
-
 
 const closeChat = async (userId, session, reason = "auto_close", lastAiMessage = "") => {
   let updatedSession = clone(session);
@@ -305,15 +289,11 @@ const closeChat = async (userId, session, reason = "auto_close", lastAiMessage =
   };
 };
 
-// ─────────────────────────────────────────────────────────────────
 // STATE HANDLERS
-// ─────────────────────────────────────────────────────────────────
 const stateHandlers = {
   [STATES.INTENT_CONFIRM]: async (normalizedText, session) => {
     const updatedSession = clone(session);
-    const confirmedIntent = ["جاهز", "نعم", "فعلي", "شراء", "اه", "ايوه", "يس", "صحيح"].some((word) =>
-      normalizedText.includes(word)
-    );
+    const confirmedIntent = ["جاهز", "نعم", "فعلي", "شراء", "اه", "ايوه", "يس", "صحيح"].some((word) => normalizedText.includes(word));
     const justExploring = ["استفسار", "بسأل", "بشوف", "لا", "فقط"].some((word) => normalizedText.includes(word));
 
     if (confirmedIntent) {
@@ -371,18 +351,33 @@ const stateHandlers = {
       return {
         updatedSession,
         nextStep: STATES.LEAD_CONTACT,
-        aiResponse: "وسيلة الاتصال غير واضحة. اكتب إيميلاً أو رقم هاتف صالحاً، مثال: name@gmail.com أو 0599xxxxxx.",
+        aiResponse: "وسيلة الاتصال غير واضحة. اكتب إيميل أو رقم هاتف صالح."
       };
     }
 
-    if (contact.type === "email") updatedSession.lead.email = contact.matchedValue.toLowerCase();
-    else updatedSession.lead.phone = contact.matchedValue;
+    const oldEmail = updatedSession.lead.email;
+    const oldPhone = updatedSession.lead.phone;
+
+    if (contact.type === "email") {
+      updatedSession.lead.email = contact.matchedValue.toLowerCase();
+    } else {
+      updatedSession.lead.phone = contact.matchedValue;
+    }
+
+    const isUpdate = (contact.type === "email" && oldEmail && oldEmail !== updatedSession.lead.email) ||
+                     (contact.type === "phone" && oldPhone && oldPhone !== updatedSession.lead.phone);
+
+    const isFirstTime = (!oldEmail && !oldPhone);
 
     if (updatedSession.lead.name && (updatedSession.lead.email || updatedSession.lead.phone)) {
       return {
         updatedSession,
         nextStep: TERMINAL_STEPS.CLOSE_FORM_COMPLETED,
-        aiResponse: "شكراً لك! تم استلام بيانات التواصل، وسيتصل بك فريق Justefy خلال أقل من ساعة. 🎉",
+        aiResponse: isUpdate
+          ? "تم تعديل بيانات الطلب بنجاح 👍 وسيتواصل معك فريق Justefy خلال أقل من ساعة."
+          : isFirstTime
+            ? "شكراً لك! تم استلام بيانات التواصل، وسيتواصل معك فريق Justefy خلال أقل من ساعة 🎉"
+            : "تم تحديث بياناتك بنجاح 👍"
       };
     }
 
@@ -390,7 +385,7 @@ const stateHandlers = {
     return {
       updatedSession,
       nextStep: STATES.FORCE_COLLECT,
-      aiResponse: "البيانات غير مكتملة. يرجى كتابة الاسم ورقم الهاتف أو الإيميل بوضوح.",
+      aiResponse: "البيانات غير مكتملة. يرجى كتابة الاسم ورقم الهاتف أو الإيميل بوضوح."
     };
   },
 
@@ -456,13 +451,8 @@ const handleTerminalStep = async (userId, session, nextStep, aiResponse) => {
   return null;
 };
 
-// ─────────────────────────────────────────────────────────────────
 // MAIN HANDLER
-// ─────────────────────────────────────────────────────────────────
-
-
 const handleChat = async (req, res) => {
-
   try {
     const { userId, message, messageId = null } = req.body || {};
     const cleanMessage = String(message || "").trim();
@@ -475,24 +465,17 @@ const handleChat = async (req, res) => {
     let currentSession = normalizeSession(rawSession);
 
     const ONE_DAY = 24 * 60 * 60 * 1000;
+    if (currentSession.lastAbuseAt && Date.now() - currentSession.lastAbuseAt > ONE_DAY) {
+      currentSession.behaviorWarnings = 0;
+    }
 
-if (
-  currentSession.lastAbuseAt &&
-  Date.now() - currentSession.lastAbuseAt > ONE_DAY
-) {
-  currentSession.behaviorWarnings = 0;
-}
     // Inactivity reset
     const now = Date.now();
     const lastActivity = currentSession.stats?.lastActivity || 0;
-    const isInactiveExpired =
-      currentSession.status !== "closed" &&
-      lastActivity &&
-      now - lastActivity > INACTIVITY_RESET_MS;
+    const isInactiveExpired = currentSession.status !== "closed" && lastActivity && (now - lastActivity > INACTIVITY_RESET_MS);
 
     if (isInactiveExpired) {
       await redis.deleteSession(userId);
-      currentSession = normalizeSession(null);
       return res.json({
         status: "new_session",
         reset: true,
@@ -501,14 +484,18 @@ if (
     }
 
     const normalizedText = normalizeText(cleanMessage);
-
+// Service detection
+    const service = detectService(normalizedText);
+    if (service) {
+      currentSession.lead.interests = [...new Set([...currentSession.lead.interests, service.name])];
+    }
     // Duplicate message guard
     if (messageId && currentSession._committedMessageId === messageId) {
       return res.json({ status: "ok", duplicate: true, aiResponse: "تم استلام رسالتك مسبقاً." });
     }
 
     // Expired closed session cleanup
-    if (currentSession.status === "closed" && currentSession.closedAt && Date.now() - currentSession.closedAt > ONE_HOUR_MS) {
+    if (currentSession.status === "closed" && currentSession.closedAt && (Date.now() - currentSession.closedAt > ONE_HOUR_MS)) {
       await redis.deleteSession(userId);
       currentSession = normalizeSession(null);
     }
@@ -520,83 +507,45 @@ if (
 
     currentSession = applyScoreDecay(currentSession);
 
-    // Safety check (strict bypass)
-    
-// ─────────────────────────────
-// ABUSE ESCALATION SYSTEM
-// ─────────────────────────────
-const strictSafetyBreach = evaluateSafetyStrictRules(normalizedText);
+    // ABUSE ESCALATION SYSTEM
+    const strictSafetyBreach = evaluateSafetyStrictRules(normalizedText);
+    if (strictSafetyBreach === AI_EVAL.KICK) {
+      currentSession.behaviorWarnings = Number(currentSession.behaviorWarnings || 0) + 1;
 
-if (strictSafetyBreach === AI_EVAL.KICK) {
+      if (currentSession.behaviorWarnings >= 3) {
+        currentSession.lastAbuseAt = Date.now();
+        const closeMsg = "تم إنهاء المحادثة بسبب تكرار استخدام أسلوب غير مناسب. يمكنك التواصل معنا لاحقاً بشكل طبيعي.";
+        currentSession.status = "closed";
+        currentSession.closedAt = Date.now();
+        currentSession = appendMessageToSession(currentSession, "assistant", closeMsg);
+        await persistSessionAtomically(userId, currentSession, messageId);
 
-  currentSession.behaviorWarnings =
-    Number(currentSession.behaviorWarnings || 0) + 1;
+        return res.json({ status: "closed", action: "abuse_close", aiResponse: closeMsg });
+      }
 
-  // 🔴 المرة الثالثة → إغلاق
-  if (currentSession.behaviorWarnings >= 3) {
+      const warnMsg = currentSession.behaviorWarnings === 1
+        ? "خلينا نحافظ على أسلوب محترم 😊 كيف أقدر أساعدك في خدماتنا؟"
+        : "يرجى استخدام أسلوب مناسب حتى أتمكن من مساعدتك بشكل أفضل.";
 
-    currentSession.lastAbuseAt = Date.now();
-    const closeMsg =
-      "تم إنهاء المحادثة بسبب تكرار استخدام أسلوب غير مناسب. يمكنك التواصل معنا لاحقاً بشكل طبيعي.";
-
-    currentSession.status = "closed";
-    currentSession.closedAt = Date.now();
-
-    currentSession = appendMessageToSession(
-      currentSession,
-      "assistant",
-      closeMsg
-    );
-
-    await persistSessionAtomically(userId, currentSession, messageId);
-
-    return res.json({
-      status: "closed",
-      action: "abuse_close",
-      aiResponse: closeMsg
-    });
-  }
-
-  // 🟡 أول مرتين → رد محترم بدون funnel
-  const warnMsg =
-    currentSession.behaviorWarnings === 1
-      ? "خلينا نحافظ على أسلوب محترم 😊 كيف أقدر أساعدك في خدماتنا؟"
-      : "يرجى استخدام أسلوب مناسب حتى أتمكن من مساعدتك بشكل أفضل.";
-
-  currentSession = appendMessageToSession(
-    currentSession,
-    "assistant",
-    warnMsg
-  );
-
-  await persistSessionAtomically(userId, currentSession, messageId);
-
-  return res.json({
-    status: "ok",
-    action: "abuse_warning",
-    aiResponse: warnMsg
-  });
-}
+      currentSession = appendMessageToSession(currentSession, "assistant", warnMsg);
+      await persistSessionAtomically(userId, currentSession, messageId);
+      return res.json({ status: "ok", action: "abuse_warning", aiResponse: warnMsg });
+    }
 
     // Append user message to history
     currentSession = appendMessageToSession(currentSession, "user", cleanMessage, messageId);
 
-    // classify intent
+    // Classify intent & update score
     const intent = classifyIntent(normalizedText);
-
-    // update score once
     currentSession = updateLeadScore(currentSession, intent);
 
-    // Funnel trigger decision (single place)
-   const isHotIntent =
-  hasExplicitBuyingIntent(normalizedText) ||
-  intent === "HOT";
+    // Funnel trigger decision
+    const isHotIntent = hasExplicitBuyingIntent(normalizedText) || intent === "HOT";
+    const startFunnel = isHotIntent && 
+                        currentSession.lead.score >= 4 && 
+                        currentSession.step === null && 
+                        !(currentSession.lead.name && (currentSession.lead.email || currentSession.lead.phone));
 
-const startFunnel =
-  isHotIntent &&
-  currentSession.lead.score >= 3 &&
-  currentSession.step === null &&
-  !(currentSession.lead.name && (currentSession.lead.email || currentSession.lead.phone));
     if (startFunnel) {
       currentSession.step = STATES.INTENT_CONFIRM;
       const funnelResponse = "واضح أنك مهتم بالبدء 👍 هل أنت جاهز لطلب الخدمة الآن أم ما زلت تستكشف الخيارات؟";
@@ -618,7 +567,7 @@ const startFunnel =
       return res.json({ status: "ok", aiResponse: handlerResult.aiResponse });
     }
 
-    // Greeting
+    // Greeting fallback
     if (isFriendlyGreeting(normalizedText)) {
       const helloResponse = "أهلاً وسهلاً بك في Justefy! 👋 كيف أقدر أساعدك اليوم؟ نعمل في SEO، إعلانات جوجل، سوشيال ميديا، وتطوير المواقع.";
       currentSession = appendMessageToSession(currentSession, "assistant", helloResponse);
@@ -626,29 +575,15 @@ const startFunnel =
       return res.json({ status: "ok", aiResponse: helloResponse });
     }
 
-    // Service detection
-    const service = detectService(normalizedText);
-    if (service) {
-      currentSession.lead.interests = [...new Set([...currentSession.lead.interests, service.name])];
-    }
+    
 
-    // Lead completeness check
-    const isLeadComplete = Boolean(
-      currentSession.lead.name &&
-      (currentSession.lead.email || currentSession.lead.phone) &&
-      currentSession.lead.score >= 2
-    );
-
-    // Resource exhaustion
-    const isResourceExhausted =
-      currentSession.stats.totalTokens >= MAX_TOKENS ||
-      currentSession.stats.userMessagesCount >= MAX_USER_MESSAGES;
+    // Lead completeness & Resource exhaustion check
+    const isLeadComplete = Boolean(currentSession.lead.name && (currentSession.lead.email || currentSession.lead.phone) && currentSession.lead.score >= 2);
+    const isResourceExhausted = currentSession.stats.totalTokens >= MAX_TOKENS || currentSession.stats.userMessagesCount >= MAX_USER_MESSAGES;
 
     if (isResourceExhausted) {
       if (isLeadComplete) {
-        return res.json(
-          await closeChat(userId, currentSession, "max_resources_reached", "تم حفظ استفسارك بنجاح، وسيتواصل معك فريق Justefy قريباً.")
-        );
+        return res.json(await closeChat(userId, currentSession, "max_resources_reached", "تم حفظ استفسارك بنجاح، وسيتواصل معك فريق Justefy قريباً."));
       }
       currentSession.step = STATES.FORCE_COLLECT;
       const emergencyResponse = "شارفت جلسة الدعم الآلي على الانتهاء. اترك اسمك ورقم هاتفك أو إيميلك وسنتواصل معك.";
@@ -657,69 +592,36 @@ const startFunnel =
       return res.json({ status: "ok", action: "keep_open_force_collect", aiResponse: emergencyResponse });
     }
 
-    // Default AI response path (could call getAIResponse if needed)
-    // For INFO intents we can use a lightweight template; for WARM/HOT we can call AI for richer reply
-   const odooData = await buildProductsContext();
-
-   let aiResponse = "أهلاً 👋 كيف أقدر أساعدك؟";
-
-// 1) HOT → funnel أو AI قوي
-if (intent === "HOT") {
-const productsContext = await buildProductsContext();
-console.log("🔥 PRODUCTS CONTEXT:");
-
-const ai = await getAIResponse({
-  history: currentSession.history,
-  userMessage: cleanMessage,
-  odooData: productsContext||"SEO, Google Ads, Website Development,Email Marketing",
-});
-
-  aiResponse = ai?.aiResponse || "أرى اهتمام واضح 👍";
-}
-
-
-// 2) WARM → AI عادي (أفضل تجربة)
-
-else if (intent === "WARM") {
-const productsContext = await buildProductsContext();
-
-const ai = await getAIResponse({
-  history: currentSession.history,
-  userMessage: cleanMessage,
-  odooData: productsContext||"SEO, Google Ads, Website Development,Email Marketing",
-});
-
-  aiResponse = ai?.aiResponse || "لا أستطيع الرد حالياً، حاول لاحقاً.";
-}
-
-// 3) INFO → AI خفيف أو fallback
-else {
-const productsContext = await buildProductsContext();
-
-const ai = await getAIResponse({
-  history: currentSession.history,
-  userMessage: cleanMessage,
-  odooData: productsContext||"SEO, Google Ads, Website Development,Email Marketing",
-});
-
-  aiResponse = ai?.aiResponse || "مرحباً 👋 كيف أقدر أساعدك؟";
-
-}
+    // AI Dynamic Routing Core Path
     console.log("🧠 AI CALL START");
+    const productsContext = await buildProductsContext();
+    
+    const aiRawResult = await getAIResponse({
+      history: currentSession.history,
+      userMessage: cleanMessage,
+      odooData: productsContext || "SEO, Google Ads, Website Development, Email Marketing",
+    });
 
-    currentSession = appendMessageToSession(currentSession, "assistant", aiResponse);
-    console.log("📦 SESSION:", currentSession);
+    // تنظيف النتيجة وحساب التوكنز بشكل سليم لمنع تجاوز الحد المسموح
+    const parsedAi = validateAndParseAiOutput(aiRawResult);
+    
+    // تحديث عداد التوكنز في السيشين
+    currentSession.stats.totalTokens += parsedAi.tokensUsed;
+
+    currentSession = appendMessageToSession(currentSession, "assistant", parsedAi.aiResponse);
+    console.log("📦 SESSION UPDATED ATOMICALLY:", currentSession);
+
     await persistSessionAtomically(userId, currentSession, messageId);
-    return res.json({ status: "ok", aiResponse });
+    return res.json({ status: "ok", aiResponse: parsedAi.aiResponse });
+
   } catch (error) {
     console.error("🔥 FULL ERROR:", error.stack || error);
-    return res.status(500).json({ status: "error", aiResponse: "حدث خطأ داخلي داخلي داخلي، يرجى المحاولة لاحقاً." });
+    return res.status(500).json({ status: "error", aiResponse: "حدث خطأ داخلي في الخادم، يرجى المحاولة لاحقاً." });
   }
 };
 
 module.exports = {
   handleChat,
-  // Exported for testing if needed
   classifyIntent,
   hasExplicitBuyingIntent,
   updateLeadScore,
