@@ -13,7 +13,7 @@ const buildDashboardData = async () => {
     const data = await odooService.execute(
       "sale.order",
       "search_read",
-      [[["x_x_is_subscription", "=", true]]],
+      [[["is_subscription", "=", true]]],
       { 
         fields: ["id", "name", "partner_id", "amount_total", "next_invoice_date", "state", "currency_id"] 
       }
