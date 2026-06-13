@@ -9,7 +9,7 @@ const buildDashboardData = async () => {
   try {
     console.log("🐢 [Odoo 19] جاري جلب بيانات فريش وسحب إيميلات العملاء...");
 
-    // ✅ تم التعديل إلى الحقل المخصص الصحيح x_x_is_subscription وإضافة الحقول المطلوبة
+    // 1️⃣ جلب الاشتراكات بطلب واحد
     const data = await odooService.execute(
       "sale.order",
       "search_read",
@@ -23,18 +23,43 @@ const buildDashboardData = async () => {
     
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+    const todayStr = today.toISOString().split('T')[0];
 
+    // 2️⃣ ⚡ الحل السحري للسرعة: جلب كل إيميلات العملاء بطلب واحد مجمع (Bulk Read)
+    const partnerIds = (data || []).map(sub => sub.partner_id && sub.partner_id[0]).filter(Boolean);
+    let partnersEmailMap = {};
+
+    if (partnerIds.length > 0) {
+      try {
+        console.log(`⚡ جاري جلب إيميلات لـ ${partnerIds.length} عملاء دفعة واحدة...`);
+        const partnersData = await odooService.execute(
+          "res.partner",
+          "search_read",
+          [[["id", "in", partnerIds]]],
+          { fields: ["id", "email"] }
+        );
+        
+        // تحويل المصفوفة إلى قاموس (Map) للوصول السريع O(1)
+        partnersData.forEach(p => {
+          if (p.id && p.email) {
+            partnersEmailMap[p.id] = p.email;
+          }
+        });
+      } catch (err) {
+        console.error("⚠️ فشل جلب إيميلات العملاء مجمعة من res.partner:", err.message);
+      }
+    }
+
+    // 3️⃣ معالجة البيانات وفحص التواريخ والتحكم في الإرسال بقفل مسبق
     const subscriptions = await Promise.all((data || []).map(async (sub) => {
-      let status = "PENDING"; // الحالة الافتراضية
+      let status = "PENDING"; 
       const expiryDateStr = sub.next_invoice_date;
       
-      // 1️⃣ أولاً: نحدد هل العميل نشط في أودو بناءً على حالة الطلب
       const isOrderActive = sub.state === 'sale' || sub.state === 'done';
       if (isOrderActive) {
           status = "ACTIVE";
       }
 
-      // 2️⃣ ثانياً: فحص التواريخ والتحكم في الإرسال
       if (expiryDateStr) {
           const expiryDate = new Date(expiryDateStr);
           expiryDate.setHours(0, 0, 0, 0);
@@ -42,66 +67,45 @@ const buildDashboardData = async () => {
           const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
           if (diffDays < 0) {
-              status = "EXPIRED"; // منتهي فعلياً
+              status = "EXPIRED"; 
           } 
           else if (diffDays >= 0 && diffDays <= 7) {
-              // نغير الحالة لـ EXPIRING فقط إذا كان العقد نشطاً لكي يظهر باللون البرتقالي
               if (isOrderActive) {
                   status = "EXPIRING";
               }
 
-              // 3️⃣ ثالثاً: نظام الإرسال الذكي والمحمي بقفل الـ Redis
               if (isOrderActive) {
-                  const todayStr = today.toISOString().split('T')[0];
                   const emailLockKey = `email_sent:${sub.id}:${todayStr}`;
-                  
                   const hasSentToday = await redis.get(emailLockKey);
 
                   if (!hasSentToday) {
-                      let clientEmail = "baraamutair2003@gmail.com"; // الإيميل الافتراضي
+                      // ✅ قفل الـ Redis يُحجز هنا فوراً (قبل الإرسال) لمنع الـ Race Condition والتكرار
+                      await redis.set(emailLockKey, "true", 86400);
 
-                      // جلب إيميل العميل الحقيقي من ريكورد res.partner في أودو
-                      if (sub.partner_id && sub.partner_id[0]) {
-                          try {
-                              const partnerId = sub.partner_id[0];
-                              const partnerData = await odooService.execute(
-                                  "res.partner",
-                                  "search_read",
-                                  [[["id", "=", partnerId]]],
-                                  { fields: ["email"] }
-                              );
-                              
-                              if (partnerData && partnerData[0] && partnerData[0].email) {
-                                  clientEmail = partnerData[0].email;
-                                  console.log(`🔍 [Odoo Contact] تم العثور على إيميل العميل: ${clientEmail}`);
-                              }
-                          } catch (partnerErr) {
-                              console.error("⚠️ فشل جلب إيميل العميل من res.partner:", partnerErr.message);
-                          }
-                      }
-                      
+                      // ⚡ قراءة الإيميل مباشرة من القاموس المخزن في الذاكرة بدون طلبات إضافية لأودو
+                      const clientEmail = partnersEmailMap[sub.partner_id?.[0]] || "baraamutair2003@gmail.com";
+
                       // تنفيذ إرسال الإيميل الفعلي
                       try {
                           await sendEmail(
                               clientEmail,
                               "تنبيه تجديد اشتراك - Justefy",
                               `<div dir="rtl" style="font-family: Arial, sans-serif; border: 1px solid #eee; padding: 20px; border-radius: 10px;">
-                                  <h2 style="color: #f97316;">مرحباً ${sub.partner_id[1]}</h2>
+                                  <h2 style="color: #f97316;">مرحباً ${sub.partner_id?.[1] || "عميلنا العزيز"}</h2>
                                   <p>نود تنبيهك بأن اشتراكك في خدمة <b>Justefy SaaS</b> ينتهي بتاريخ <b>${expiryDateStr}</b>.</p>
                                   <p>بقي لك <b>${diffDays}</b> أيام فقط على انتهاء الخدمة لتجنب انقطاعها.</p>
                                   <hr style="border: 0; border-top: 1px solid #eee;" />
                                   <p style="font-size: 12px; color: #666;">تم إنتاج هذا التنبيه آلياً بواسطة نظام CRM لـ Justefy.</p>
                               </div>`
                           );
-                          console.log(`📧 [Redis Lock] تم إرسال إيميل بنجاح لـ ${sub.partner_id[1]} إلى: ${clientEmail}`);
-                          
-                          // حفظ القفل في Redis لمدة 24 ساعة لعدم تكرار الإرسال اليوم عند عمل Refresh
-                          await redis.set(emailLockKey, "true", 86400);
+                          console.log(`📧 [Redis Lock] تم إرسال إيميل بنجاح لـ ${sub.partner_id?.[1]} إلى: ${clientEmail}`);
                       } catch (e) {
-                          console.error("❌ فشل إرسال الإيميل الفعلي:", e.message);
+                          // ⚠️ إذا فشل الإرسال الفعلي، نحرر القفل لكي تتاح المحاولة مرة أخرى لاحقاً
+                          await redis.del(emailLockKey);
+                          console.error("❌ فشل إرسال الإيميل الفعلي، تم تحرير القفل:", e.message);
                       }
                   } else {
-                      console.log(`🔒 [Redis Lock] تم إرسال تنبيه لـ ${sub.partner_id[1]} مسبقاً اليوم، تم التخطي لحماية السيرفر.`);
+                      console.log(`🔒 [Redis Lock] تم إرسال تنبيه لـ ${sub.partner_id?.[1]} مسبقاً اليوم، تم التخطي لحماية السيرفر.`);
                   }
               }
           }
