@@ -1,21 +1,20 @@
 const nodemailer = require("nodemailer");
 
 const transporter = nodemailer.createTransport({
-  // ⚡ إزالة service: "gmail" وضبط الـ host يدوياً أفضل للتحكم بالبورتات
   host: "smtp.gmail.com",
-  port: 465,         // المنفذ الآمن ضد الحظر
-  secure: true,      // تفعيل التشفير الصارم والمباشر منذ البداية (SSL/TLS)
+  port: 587,         // نعود لـ 587 لكن مع إجبار IPv4
+  secure: false,     // false تعني استخدام STARTTLS وهو الأنسب للـ IPv4 محلياً
   auth: {
     user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS, // تأكد أنه App Password من 16 حرفاً وليس كلمة مرور حسابك
+    pass: process.env.EMAIL_PASS, 
   },
+  family: 4,         // ⚡ إجبار صريح على استخدام IPv4 لمنع خطأ ENETUNREACH
   tls: {
-    // يحميك في بيئة الـ Localhost إذا كان هناك مشاكل في الشهادات المحلية
     rejectUnauthorized: false,
+    minVersion: "TLSv1.2"
   },
-  // ⚡ إضافة مؤقتات فحص صارمة لمنع السيرفر من التعليق للأبد في حال حدثت مشكلة شبكة
-  connectionTimeout: 5000, // 5 ثوانٍ كحد أقصى للاتصال
-  greetingTimeout: 5000,   // 5 ثوانٍ بانتظار ترحيب السيرفر
+  connectionTimeout: 5000, 
+  greetingTimeout: 5000,   
 });
 
 const sendEmail = async (to, subject, html) => {
