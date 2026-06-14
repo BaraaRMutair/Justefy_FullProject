@@ -9,7 +9,7 @@ const buildDashboardData = async () => {
   try {
     console.log("🐢 [Odoo 19] جاري جلب بيانات فريش وسحب إيميلات العملاء...");
 
-    // 1️⃣ جلب الاشتراكات بطلب واحد
+    // 1️⃣ جلب الاشتراكات بطلب واحد مجمع من أودو
     const data = await odooService.execute(
       "sale.order",
       "search_read",
@@ -25,7 +25,7 @@ const buildDashboardData = async () => {
     today.setHours(0, 0, 0, 0);
     const todayStr = today.toISOString().split('T')[0];
 
-    // 2️⃣ ⚡ الحل السحري للسرعة: جلب كل إيميلات العملاء بطلب واحد مجمع (Bulk Read)
+    // 2️⃣ ⚡ الطلب المجمع (Bulk Read): جلب كل إيميلات العملاء بطلب واحد لمنع البطء
     const partnerIds = (data || []).map(sub => sub.partner_id && sub.partner_id[0]).filter(Boolean);
     let partnersEmailMap = {};
 
@@ -39,7 +39,7 @@ const buildDashboardData = async () => {
           { fields: ["id", "email"] }
         );
         
-        // تحويل المصفوفة إلى قاموس (Map) للوصول السريع O(1)
+        // تحويل المصفوفة إلى قاموس لسرعة القراءة في الذاكرة
         partnersData.forEach(p => {
           if (p.id && p.email) {
             partnersEmailMap[p.id] = p.email;
@@ -50,7 +50,7 @@ const buildDashboardData = async () => {
       }
     }
 
-    // 3️⃣ معالجة البيانات وفحص التواريخ والتحكم في الإرسال بقفل مسبق
+    // 3️⃣ معالجة البيانات وفحص التواريخ والتحكم في الإرسال
     const subscriptions = await Promise.all((data || []).map(async (sub) => {
       let status = "PENDING"; 
       const expiryDateStr = sub.next_invoice_date;
@@ -79,31 +79,36 @@ const buildDashboardData = async () => {
                   const hasSentToday = await redis.get(emailLockKey);
 
                   if (!hasSentToday) {
-                      // ✅ قفل الـ Redis يُحجز هنا فوراً (قبل الإرسال) لمنع الـ Race Condition والتكرار
+                      // ✅ قفل الـ Redis يُحجز هنا فوراً لمنع التكرار أثناء المعالجة في الخلفية
                       await redis.set(emailLockKey, "true", 86400);
 
-                      // ⚡ قراءة الإيميل مباشرة من القاموس المخزن في الذاكرة بدون طلبات إضافية لأودو
                       const clientEmail = partnersEmailMap[sub.partner_id?.[0]] || "baraamutair2003@gmail.com";
 
-                      // تنفيذ إرسال الإيميل الفعلي
-                      try {
-                          await sendEmail(
-                              clientEmail,
-                              "تنبيه تجديد اشتراك - Justefy",
-                              `<div dir="rtl" style="font-family: Arial, sans-serif; border: 1px solid #eee; padding: 20px; border-radius: 10px;">
-                                  <h2 style="color: #f97316;">مرحباً ${sub.partner_id?.[1] || "عميلنا العزيز"}</h2>
-                                  <p>نود تنبيهك بأن اشتراكك في خدمة <b>Justefy SaaS</b> ينتهي بتاريخ <b>${expiryDateStr}</b>.</p>
-                                  <p>بقي لك <b>${diffDays}</b> أيام فقط على انتهاء الخدمة لتجنب انقطاعها.</p>
-                                  <hr style="border: 0; border-top: 1px solid #eee;" />
-                                  <p style="font-size: 12px; color: #666;">تم إنتاج هذا التنبيه آلياً بواسطة نظام CRM لـ Justefy.</p>
-                              </div>`
-                          );
-                          console.log(`📧 [Redis Lock] تم إرسال إيميل بنجاح لـ ${sub.partner_id?.[1]} إلى: ${clientEmail}`);
-                      } catch (e) {
-                          // ⚠️ إذا فشل الإرسال الفعلي، نحرر القفل لكي تتاح المحاولة مرة أخرى لاحقاً
-                          await redis.del(emailLockKey);
-                          console.error("❌ فشل إرسال الإيميل الفعلي، تم تحرير القفل:", e.message);
-                      }
+                      // ⚡ إطلاق الإرسال في الخلفية (Background Task) بدون await لإنهاء تعليق الشاشة
+                      sendEmail(
+                          clientEmail,
+                          "تنبيه تجديد اشتراك - Justefy",
+                          `<div dir="rtl" style="font-family: Arial, sans-serif; border: 1px solid #eee; padding: 20px; border-radius: 10px;">
+                              <h2 style="color: #f97316;">مرحباً ${sub.partner_id?.[1] || "عميلنا العزيز"}</h2>
+                              <p>نود تنبيهك بأن اشتراكك في خدمة <b>Justefy SaaS</b> ينتهي بتاريخ <b>${expiryDateStr}</b>.</p>
+                              <p>بقي لك <b>${diffDays}</b> أيام فقط على انتهاء الخدمة لتجنب انقطاعها.</p>
+                              <hr style="border: 0; border-top: 1px solid #eee;" />
+                              <p style="font-size: 12px; color: #666;">تم إنتاج هذا التنبيه آلياً بواسطة نظام CRM لـ Justefy.</p>
+                          </div>`
+                      )
+                      .then(() => {
+                          console.log(`📧 [Background Mail] تم إرسال إيميل بنجاح لـ ${sub.partner_id?.[1]} إلى: ${clientEmail}`);
+                      })
+                      .catch(async (emailErr) => {
+                          console.error(`❌ [Background Mail] فشل إرسال الإيميل لـ ${sub.partner_id?.[1]}:`, emailErr.message);
+                          try {
+                              // إذا فشل الإرسال (مثل الـ Timeout)، نحذف القفل فوراً لإتاحة المحاولة مجدداً لاحقاً
+                              await redis.del(emailLockKey);
+                              console.log(`🔓 [Redis Lock] تم تحرير القفل لـ ${sub.partner_id?.[1]} لإعادة المحاولة.`);
+                          } catch (redisErr) {
+                              console.error("❌ فشل حذف مفتاح الـ Redis:", redisErr.message);
+                          }
+                      });
                   } else {
                       console.log(`🔒 [Redis Lock] تم إرسال تنبيه لـ ${sub.partner_id?.[1]} مسبقاً اليوم، تم التخطي لحماية السيرفر.`);
                   }
